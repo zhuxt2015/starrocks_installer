@@ -114,7 +114,8 @@ StarRocks 是一款高性能分析型数据仓库，使用向量化、MPP 架构
 # 第一步：下载并解压
 
 # 第二步：进入目录并执行安装
-cd starrocks_installer && chmod +x install_install_starrocks.sh
+cd starrocks_installer 
+chmod +x install_starrocks.sh
 
 # 第三部: 修改config.properties中的配置(可选)
 config/config.properties
