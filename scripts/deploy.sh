@@ -225,14 +225,15 @@ main() {
     # 修改fe root帐号密码
     if [ -n "$fe_root_password" ];then
         log_info "Modifying fe root account password"
-        mysql -h "$leader" -uroot -P9030 -e "alter user root identified by '$fe_root_password'"
+        mysql --connect_timeout=5 -h "$leader" -uroot -P9030 -Ne "alter user root identified by '$fe_root_password'"
     fi
     # 打印集群信息
     log_info "StarRocks cluster information:"
-    log_info "FE Leader: $leader"
-    log_info "FE Followers: $follower"
-    log_info "BE Nodes: $backend"
-
+    if [ -n "$fe_root_password" ];then
+        mysql --connect_timeout=5 -h "$leader" -uroot -P9030 -p${fe_root_password} -e "show frontends;show backends;"
+    else
+        mysql --connect_timeout=5 -h "$leader" -uroot -P9030 -e "show frontends;show backends;"
+    fi
 
     log_info "StarRocks installation completed successfully"
 }

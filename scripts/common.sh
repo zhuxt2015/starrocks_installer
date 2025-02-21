@@ -186,6 +186,14 @@ distribute_install_file() {
     fi
 
 }
+# 启动服务
+start_service() {
+    local host=$1
+    local service=$2
+    log_info "Starting $service on $host"
+    remote_exec "$host" "systemctl start starrocks_${service}"
+    log_info "$service on $host started"
+}
 
 # 停止服务
 stop_service() {

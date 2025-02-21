@@ -8,9 +8,8 @@
 ###################################################
 
 set -eu
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/scripts/log.sh"
-source "$SCRIPT_DIR/scripts/common.sh"
+source "scripts/log.sh"
+source "scripts/common.sh"
 
 # 远程执行命令的函数
 sudo_remote_exec() {

@@ -9,7 +9,7 @@
 set -eu
 START_TIME=$(date +%s)
 
-bash scripts/log.sh
+source scripts/log.sh
 bash scripts/passwordless.sh
 bash scripts/check_environment.sh
 bash scripts/init_environment.sh
