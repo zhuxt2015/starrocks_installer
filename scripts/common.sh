@@ -29,6 +29,13 @@ check_file() {
         exit 1
     fi
 }
+# 检查文件是否存在
+check_directory() {
+    if [[ ! -d "$1" ]]; then
+        log_error "Directory not found:: $1"
+        exit 1
+    fi
+}
 # 读取主机配置
 read_hosts_config() {
     check_file "$hosts_config_file"
@@ -100,8 +107,6 @@ read_config() {
         value=$(echo "$value" | tr -d ' ')
         eval "$key='$value'"
     done < "$setup_config_file"
-    # 处理版本号变量
-    install_package=$(echo "$install_package" | sed "s#\${starrocks_version}#$starrocks_version#g")
 }
 
 # 读取安装配置
@@ -307,4 +312,26 @@ configure_be() {
         fi
     done
     loop_nosudo_remote_exec "$host" "${commands[@]}"
+}
+
+download_package() {
+    local version=$1
+    package_filename="StarRocks-${version}-centos-amd64.tar.gz"
+    package_filepath="${package_path%/}/$package_filename"
+    if ! check_file "$package_filepath"; then
+        log_info "Downloading $package_filename to $package_filepath"
+        if check_directory "$package_path";then
+            sudo mkdir -P $package_path && sudo chown -R $install_user:$install_user $package_path
+        fi
+        wget -P $package_path -O $package_filename "${package_url%/}/$package_filename"
+    fi
+}
+
+mysql_command_exec(){
+    local command=$1
+    if [ -n "$fe_root_password" ];then
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -e "$command"
+    else
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -e "$command"
+    fi
 }

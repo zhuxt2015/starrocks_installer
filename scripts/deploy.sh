@@ -84,6 +84,23 @@ decompress_package() {
     loop_remote_exec "${host}" "${commands[@]}"
 }
 
+# 解压 StarRocks 包
+decompress_specify_package() {
+    local host=$1
+    local service=$2
+
+    log_info "Decompressing StarRocks package on $host, please wait for about 1 minute"
+    local child_dir="StarRocks-${starrocks_version}-centos-amd64"
+    local commands=(
+        "rm -rf ${install_path%/}/$service"
+        "tar -xzf $install_package -C $install_path ${child_dir}/${service}"
+        "mv ${install_path%/}/${child_dir}/${service} $install_path"
+        "chown -R $install_user:$install_user $install_path"
+        "rm -rf ${install_path%/}/$child_dir"
+    )
+    loop_remote_exec "${host}" "${commands[@]}"
+}
+
 
 
 create_service() {
@@ -172,17 +189,17 @@ main() {
     read_config
     read_fe_config
     read_be_config
-
+    package_filename="StarRocks-${starrocks_version}-centos-amd64.tar.gz"
+    install_package=${package_path%/}/$package_filename
     if [ ! -f "$install_package" ]; then
         if [ "$online_install" == "false" ];then
             log_error "StarRocks package not found: $install_package"
             exit 1
         else
-            log_info "Downloading StarRocks package from ${starrocks_download_url%/}/starrocks-${starrocks_version}-centos-amd64.tar.gz"
-            curl -o "$install_package" "${starrocks_download_url%/}/starrocks-${starrocks_version}-centos-amd64.tar.gz"
+            log_info "Downloading StarRocks package from ${starrocks_download_url%/}/$package_filename"
+            curl -o "$install_package" "${starrocks_download_url%/}/$package_filename"
         fi
     fi
-
     # 安装从节点 FE
     if [ -n "$leader" ]; then
         local frontend_hosts=()

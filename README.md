@@ -26,10 +26,10 @@ StarRocks 是一款高性能分析型数据仓库，使用向量化、MPP 架构
 
 
 ## 支持版本
-| 版本    | 状态 |
-|-------|------|
-| 3.3.9 | ✅ 已测试 |
-| 3.3.5 | ✅ 已测试 |
+| 版本    | 状态    |
+|-------|-------|
+| 3.x.x | ✅ 已测试 |
+| 2.x.x | 待测试   |
 
 ## 支持部署模式
 | 部署模式     | 状态    |
@@ -107,8 +107,8 @@ StarRocks 是一款高性能分析型数据仓库，使用向量化、MPP 架构
 > ⚠️ 注意：
 > - 安装用户必须具有sudo权限或者是root用户
 > - 安装脚本部署的机器默认为FE leader节点
-> - 支持 Java 8 或 Java 11
-> - 在线安装模式下,如未安装Java会提示自动安装:
+> - 如未安装Java会提示自动安装:
+> - 由于StarRocks安装包较大，建议提前下载到本地，缩短安装耗时
 
 ```bash
 # 第一步：下载并解压
@@ -143,11 +143,14 @@ config/be.conf
 
 ## 操作命令
 ### 集群管理
-| 操作 | 命令
-|------|--------------------------------------------------|
-| 启动集群 | `./start_cluster.sh` |
-| 停止集群 | `./stop_cluster.sh` |
-| 滚动重启 | `./rolling_restart.sh` |
+| 操作 | 命令                                 
+|------|------------------------------------|
+| 启动集群 | `./start_cluster.sh`               |
+| 停止集群 | `./stop_cluster.sh`                |
+| 升级集群 | `./upgrade/upgrade_cluster.sh`        |
+| 降级集群 | `./downgrade/downgrade_cluster.sh` |
+| 配置分发 | `./scripts/config_distribution.sh` |
+
 
 ### 服务管理
 | 操作 | 命令                                               |
@@ -186,8 +189,8 @@ yum_repo_url=http://mirrors.aliyun.com/repo/Centos-7.repo
 starrocks_download_url=https://releases.mirrorship.cn/starrocks/
 #starrocks版本
 starrocks_version=3.3.5
-#starrocks安装包文件路径
-install_package=/tmp/StarRocks-${starrocks_version}-centos-amd64.tar.gz
+#安装包存放路径
+package_path=/tmp/
 #starrocks安装路径
 install_path=/opt/test_sr/
 #fe配置文件路径
@@ -207,6 +210,10 @@ hdfs_site_file=/home/starrocks/hdfs-site.xml
 core_site_file=/home/starrocks/core-site.xml
 #fe root密码
 fe_root_password=
+#starrocks升级包文件路径
+upgrade_version=3.3.10
+#starrocks升级包文件路径
+downgrade_version=3.3.5
 ```
 
 ### hosts.properties主机配置

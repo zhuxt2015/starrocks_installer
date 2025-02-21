@@ -32,4 +32,6 @@ log_info "Restart BE service: sudo systemctl restart starrocks_be"
 
 log_info "Start Cluster: bash ./start_cluster.sh"
 log_info "Stop Cluster: bash ./stop_cluster.sh"
+log_info "Upgrade Cluster: bash ./upgrade/upgrade_cluster.sh"
+log_info "Download Cluster: bash ./downgrade/downgrade_cluster.sh"
 log_info "uninstall Cluster: bash ./uninstall.sh"
