@@ -36,7 +36,7 @@ delete_directory() {
     local path=$2
     log_info "Deleting directory $path on $host"
     if  check_directory_exists "$host" "$path";then
-        remote_exec "$host" "rm -rf $path"
+        remote_exec_sudo "$host" "rm -rf $path"
     fi
 }
 

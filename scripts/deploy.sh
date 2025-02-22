@@ -17,7 +17,7 @@ source "$SCRIPT_DIR/common.sh"
 check_file_exists() {
     local host=$1
     local file=$2
-    remote_exec "$host" "[ -f $file ]" && return 0 || return 1
+    remote_exec_sudo "$host" "[ -f $file ]" && return 0 || return 1
 }
 
 # 创建必要目录
@@ -62,7 +62,7 @@ create_directories() {
             "chmod -R 755 $dir"
         )
 
-        loop_remote_exec "$host" "${commands[@]}"
+        loop_remote_exec_sudo "$host" "${commands[@]}"
 
     done
 }
@@ -81,7 +81,7 @@ decompress_package() {
         "chown -R $install_user:$install_user $install_path"
         "rm -rf ${install_path%/}/$child_dir"
     )
-    loop_remote_exec "${host}" "${commands[@]}"
+    loop_remote_exec_sudo "${host}" "${commands[@]}"
 }
 
 # 解压 StarRocks 包
@@ -98,7 +98,7 @@ decompress_specify_package() {
         "chown -R $install_user:$install_user $install_path"
         "rm -rf ${install_path%/}/$child_dir"
     )
-    loop_remote_exec "${host}" "${commands[@]}"
+    loop_remote_exec_sudo "${host}" "${commands[@]}"
 }
 
 
@@ -113,7 +113,7 @@ create_service() {
     local service_file="/etc/systemd/system/${service_name}.service"
 
     log_info "Creating systemd service file: $service_file"
-    cat <<EOF | remote_exec $host "tee $service_file >/dev/null"
+    cat <<EOF | remote_exec_sudo $host "tee $service_file >/dev/null"
 [Unit]
 Description=StarRocks ${service_name^} Service
 After=network.target
@@ -137,11 +137,11 @@ WantedBy=multi-user.target
 EOF
 
     log_info "$host Reloading systemd daemon..."
-    remote_exec "$host" "systemctl daemon-reload"
+    remote_exec_sudo "$host" "systemctl daemon-reload"
 
     log_info "$host Enabling and starting $service_name service..."
-    remote_exec "$host" "systemctl enable $service_name"
-    remote_exec "$host" "systemctl start $service_name"
+    remote_exec_sudo "$host" "systemctl enable $service_name"
+    remote_exec_sudo "$host" "systemctl start $service_name"
     log_info "$host $service_name service setup complete."
 }
 
@@ -182,13 +182,12 @@ follower_first_start() {
 
 # 主函数
 main() {
-    log_info "Starting StarRocks installation..."
-
     # 读取配置
     read_hosts_config
     read_config
     read_fe_config
     read_be_config
+    log_info "Starting $starrocks_version StarRocks installation ..."
     package_filename="StarRocks-${starrocks_version}-centos-amd64.tar.gz"
     install_package=${package_path%/}/$package_filename
     if [ ! -f "$install_package" ]; then

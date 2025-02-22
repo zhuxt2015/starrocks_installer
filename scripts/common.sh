@@ -148,8 +148,8 @@ read_be_config() {
 
 }
 
-# 远程执行命令的函数
-remote_exec() {
+# 远程执行sudo+命令
+remote_exec_sudo() {
     local host=$1
     local cmd=$2
     if ! sudo -u "$install_user" ssh "$install_user"@"$host" "source /etc/profile;sudo $cmd"; then
@@ -157,21 +157,26 @@ remote_exec() {
         return 1
     fi
 }
-# 检查文件是否已存在
-check_directory_exists() {
-    local host=$1
-    local dir=$2
-    remote_exec "$host" "[ -d $dir ]" && return 0 || return 1
-}
 
-# 检查文件是否已存在
-check_file_exists() {
+# 远程执行命令，不带sudo
+remote_exec() {
     local host=$1
-    local file=$2
-    remote_exec "$host" "[ -f $file ]" && return 0 || return 1
+    local cmd=$2
+    if ! sudo -u "$install_user" ssh "$install_user"@"$host" "source /etc/profile;$cmd"; then
+        log_warn "[$host] command failed: $cmd"
+        return 1
+    fi
 }
-
-# 循环执行多条命令
+# 循环执行多条sudo+命令
+loop_remote_exec_sudo () {
+    local host=$1
+    shift
+    local commands=("$@")
+    for command in "${commands[@]}"; do
+        remote_exec_sudo "$host" "$command"
+    done
+}
+#循环执行多个命令,不带sudo
 loop_remote_exec () {
     local host=$1
     shift
@@ -179,6 +184,20 @@ loop_remote_exec () {
     for command in "${commands[@]}"; do
         remote_exec "$host" "$command"
     done
+}
+
+# 检查文件是否已存在
+check_directory_exists() {
+    local host=$1
+    local dir=$2
+    remote_exec_sudo "$host" "[ -d $dir ]" && return 0 || return 1
+}
+
+# 检查文件是否已存在
+check_file_exists() {
+    local host=$1
+    local file=$2
+    remote_exec_sudo "$host" "[ -f $file ]" && return 0 || return 1
 }
 
 #分发安装包
@@ -195,8 +214,8 @@ distribute_install_file() {
 start_service() {
     local host=$1
     local service=$2
-    log_info "Starting $service on $host"
-    remote_exec "$host" "systemctl start starrocks_${service}"
+    log_info "Starting ${service^^} on $host"
+    remote_exec_sudo "$host" "systemctl start starrocks_${service}"
     log_info "$service on $host started"
 }
 
@@ -205,22 +224,22 @@ stop_service() {
     local host=$1
     local service=$2
     local service_name="starrocks_$service"
-    log_info "Stopping $service on $host"
+    log_info "Stopping ${service^^} on $host"
 
     if [ "$service" == "fe" ];then
         if remote_exec "$host" "ps -ef|grep -v grep |grep -q 'com.starrocks.StarRocksFE'"; then
             if check_file_exists "$host" "/etc/systemd/system/${service_name}.service"; then
-                remote_exec "$host" "systemctl stop $service_name"
+                remote_exec_sudo "$host" "systemctl stop $service_name"
             else
-                remote_exec "$host" "pkill -9 -f 'com.starrocks.StarRocksFE'" || true
+                remote_exec "$host" "pkill -f 'com.starrocks.StarRocksFE'" || true
             fi
         fi
     else
         if remote_exec "$host" "ps -ef|grep -v grep |grep -q 'starrocks_be'"; then
             if check_file_exists "$host" "/etc/systemd/system/${service_name}.service"; then
-                remote_exec "$host" "systemctl stop $service_name"
+                remote_exec_sudo "$host" "systemctl stop $service_name"
             else
-                remote_exec "$host" "pkill -9 -f 'starrocks_be'" || true
+                remote_exec "$host" "pkill -f 'starrocks_be'" || true
             fi
         fi
     fi
@@ -235,7 +254,7 @@ check_service_status() {
 
     if [ "$node_type" = "fe" ]; then
         for _ in $(seq 0 "$count"); do
-            if remote_exec "$host" "ss -tnlp | grep -q $query_port"; then
+            if remote_exec_sudo "$host" "ss -tnlp | grep -q $query_port"; then
                 return 0
             fi
             sleep 5
@@ -244,7 +263,7 @@ check_service_status() {
         return 1
     else
         for _ in $(seq 0 "$count"); do
-            if remote_exec "$host" "ss -tnlp | grep -q $be_port"; then
+            if remote_exec_sudo "$host" "ss -tnlp | grep -q $heartbeat_service_port"; then
                 return 0
             fi
             sleep 5
@@ -255,15 +274,7 @@ check_service_status() {
     fi
 }
 
-#循环执行多个命令
-loop_nosudo_remote_exec () {
-    local host=$1
-    shift
-    local commands=("$@")
-    for command in "${commands[@]}"; do
-        sudo -u "$install_user" ssh "$install_user"@"$host" "source /etc/profile;$command"
-    done
-}
+
 
 # 分发FE配置
 configure_fe() {
@@ -286,7 +297,7 @@ configure_fe() {
             commands+=("$remote_script")
         fi
     done
-    loop_nosudo_remote_exec "$host" "${commands[@]}"
+    loop_remote_exec "$host" "${commands[@]}"
 }
 
 # 分发BE配置
@@ -311,9 +322,9 @@ configure_be() {
             commands+=("$remote_script")
         fi
     done
-    loop_nosudo_remote_exec "$host" "${commands[@]}"
+    loop_remote_exec "$host" "${commands[@]}"
 }
-
+# 下载StarRocks安装包
 download_package() {
     local version=$1
     package_filename="StarRocks-${version}-centos-amd64.tar.gz"
@@ -324,14 +335,41 @@ download_package() {
             sudo mkdir -P $package_path && sudo chown -R $install_user:$install_user $package_path
         fi
         wget -P $package_path -O $package_filename "${package_url%/}/$package_filename"
+    else
+        log_info "Install package already exists at $package_filepath"
     fi
 }
-
+# 执行mysql命令
 mysql_command_exec(){
     local command=$1
     if [ -n "$fe_root_password" ];then
-        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -e "$command"
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -se "$command"
     else
-        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -e "$command"
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -se "$command"
+    fi
+}
+
+# 执行mysql命令,
+mysql_command_exec_silent(){
+    local command=$1
+    if [ -n "$fe_root_password" ];then
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -sse "$command"
+    else
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -sse "$command"
+    fi
+}
+
+# 获取当前版本
+get_current_version() {
+    local host=$1
+    local service=$2
+    local command="${install_path%/}/${service}/bin/show_${service}_version.sh"
+    local show_version=$(remote_exec "$host" "$command")
+    if [ -n "$show_version" ];then
+        if [ "$service" = "fe" ];then
+            echo "$show_version" | awk '/Build version/ { print $3 }'
+        elif [ "$service" = "be" ]; then
+            echo "$show_version" | head -n1
+        fi
     fi
 }

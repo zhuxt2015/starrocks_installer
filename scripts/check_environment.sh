@@ -14,7 +14,7 @@ source "$SCRIPT_DIR/common.sh"
 check_avx2() {
     local host=$1
     log_info "Checking AVX2 support on $host"
-    if remote_exec "$host" "grep -q avx2 /proc/cpuinfo"; then
+    if remote_exec_sudo "$host" "grep -q avx2 /proc/cpuinfo"; then
         log_info "[$host] CPU supports AVX2"
         return 0
     else
@@ -31,8 +31,8 @@ check_node_specs() {
     log_info "Checking hardware specifications on $host"
 
     # 获取CPU核心数和内存大小
-    local cpu_cores=$(remote_exec "$host" "nproc")
-    local total_mem=$(remote_exec "$host" "free -g | awk '/^Mem:/{print \$2}'")
+    local cpu_cores=$(remote_exec_sudo "$host" "nproc")
+    local total_mem=$(remote_exec_sudo "$host" "free -g | awk '/^Mem:/{print \$2}'")
 
     if [ "$is_fe" = true ]; then
         # FE节点检查
@@ -75,7 +75,7 @@ check_ports() {
         for key in "${!fe_configs[@]}"; do
             port="${fe_configs[$key]}"
             if [[ -n "$port" ]] && [[ ${key,,} =~ .*_port$ ]]; then
-                if remote_exec "$host" "ss -tlnp | grep -q ':$port '"; then
+                if remote_exec_sudo "$host" "ss -tlnp | grep -q ':$port '"; then
                     log_warn "[$host] FE port $port is already in use"
                 else
                     log_info "[$host] FE port $port is available"
@@ -87,7 +87,7 @@ check_ports() {
         for key in "${!be_configs[@]}"; do
             port="${be_configs[$key]}"
             if [[ -n "$port" ]] && [[ ${key,,} =~ .*_port$ ]]; then
-                if remote_exec "$host" "ss -tlnp | grep -q ':$port '"; then
+                if remote_exec_sudo "$host" "ss -tlnp | grep -q ':$port '"; then
                     log_warn "[$host] BE port $port is already in use"
                 else
                     log_info "[$host] BE port $port is available"

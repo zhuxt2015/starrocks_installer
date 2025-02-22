@@ -21,7 +21,7 @@ create_service() {
     local service_file="/etc/systemd/system/${service_name}.service"
 
     log_info "Creating systemd service file: $service_file"
-    cat <<EOF | remote_exec $host "tee $service_file >/dev/null"
+    cat <<EOF | remote_exec_sudo $host "tee $service_file >/dev/null"
 [Unit]
 Description=StarRocks ${service_name^} Service
 After=network.target
@@ -43,11 +43,11 @@ WantedBy=multi-user.target
 EOF
 
     log_info "$host Reloading systemd daemon..."
-    remote_exec "$host" "systemctl daemon-reload"
+    remote_exec_sudo "$host" "systemctl daemon-reload"
 
     log_info "$host Enabling and starting $service_name service..."
-    remote_exec "$host" "systemctl enable $service_name"
-    remote_exec "$host" "systemctl start $service_name"
+    remote_exec_sudo "$host" "systemctl enable $service_name"
+    remote_exec_sudo "$host" "systemctl start $service_name"
     log_info "$host $service_name service setup complete."
 }
 

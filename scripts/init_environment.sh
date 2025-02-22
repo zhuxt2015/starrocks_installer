@@ -16,13 +16,13 @@ remote_init() {
     log_info "Starting initialization on node: $host"
 
     # 复制初始化脚本到远程主机
-    remote_exec $host "cat > /tmp/remote_init.sh" < "$remote_init_config"
+    remote_exec_sudo $host "cat > /tmp/remote_init.sh" < "$remote_init_config"
 
     # 在远程主机上执行初始化脚本
-    remote_exec "$host" "bash /tmp/remote_init.sh"
+    remote_exec_sudo "$host" "bash /tmp/remote_init.sh"
 
     # 清理临时文件
-    # remote_exec "$host" "rm -f /tmp/remote_init.sh"
+    # remote_exec_sudo "$host" "rm -f /tmp/remote_init.sh"
 
     log_info "System initialization completed on $host"
 }
@@ -45,7 +45,7 @@ check_init_status() {
     )
 
     for check in "${checks[@]}"; do
-        if ! remote_exec "$host" "$check" >/dev/null 2>&1; then
+        if ! remote_exec_sudo "$host" "$check" >/dev/null 2>&1; then
             log_warn "[$host] Check failed: $check"
         fi
     done
@@ -71,7 +71,7 @@ main() {
         check_init_status "$node"
     done
 
-    log_info "All nodes have been processed"
+    log_info "All nodes have been initialized"
 }
 
 # 执行主函数
