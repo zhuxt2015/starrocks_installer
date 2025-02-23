@@ -245,7 +245,7 @@ function update_yum_repo()
             echo "backup yum repo"
             mkdir -p /etc/yum.repos.d/repo_bak
             mv /etc/yum.repos.d/*.repo /etc/yum.repos.d/repo_bak
-            curl -o /etc/yum.repos.d/CentOS-Base.repo ${yum_repo_url}
+            wget -O /etc/yum.repos.d/CentOS-Base.repo ${yum_repo_url}
             # 清理 YUM 缓存并生成新缓存
             yum clean all
             echo "yum repo update succeed!"

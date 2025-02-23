@@ -115,7 +115,7 @@ create_service() {
     log_info "Creating systemd service file: $service_file"
     cat <<EOF | remote_exec_sudo $host "tee $service_file >/dev/null"
 [Unit]
-Description=StarRocks ${service_name^} Service
+Description=StarRocks ${service_name^^} Service
 After=network.target
 
 [Service]
@@ -196,7 +196,7 @@ main() {
             exit 1
         else
             log_info "Downloading StarRocks package from ${starrocks_download_url%/}/$package_filename"
-            curl -o "$install_package" "${starrocks_download_url%/}/$package_filename"
+            wget -O "$install_package" "${starrocks_download_url%/}/$package_filename"
         fi
     fi
     # 安装从节点 FE
@@ -204,6 +204,10 @@ main() {
         local frontend_hosts=()
         frontend_hosts+=("$leader")
         if [ -n "$follower" ];then
+            if echo "$follower"|grep -qw "$leader";then
+                log_error "The leader node cannot be included in the follower node list."
+                exit 1
+            fi
             IFS=',' read -ra FOLLOWERS <<< "$follower"
             frontend_hosts+=("${FOLLOWERS[@]}")
         fi

@@ -128,7 +128,17 @@ config/be.conf
 
 ```
 
-
+### 升级集群
+> - 滚动升级各个节点，建议先升级一个BE观察一下，再决定整体升级(将config.properties中的backend配置一个BE的IP)
+> - 先升级 BE，然后升级 FE，先升级follower FE,再升级leader FE
+> - 升级过程中，FE leader节点会自动切换为FE follower节点
+```bash
+#第一步 修改升级版本号
+vim config.properties
+upgrade_version=3.3.10
+# 第二步 执行升级
+./upgrade/upgrade_cluster.sh
+```
 
 
 ### 卸载StarRocks

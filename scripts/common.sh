@@ -334,7 +334,7 @@ download_package() {
         if check_directory "$package_path";then
             sudo mkdir -P $package_path && sudo chown -R $install_user:$install_user $package_path
         fi
-        wget -P $package_path -O $package_filename "${package_url%/}/$package_filename"
+        wget -O $package_filename "${package_url%/}/$package_filename"
     else
         log_info "Install package already exists at $package_filepath"
     fi
@@ -343,9 +343,9 @@ download_package() {
 mysql_command_exec(){
     local command=$1
     if [ -n "$fe_root_password" ];then
-        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -se "$command"
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -e "$command"
     else
-        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -se "$command"
+        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -e "$command"
     fi
 }
 
@@ -359,17 +359,185 @@ mysql_command_exec_silent(){
     fi
 }
 
-# 获取当前版本
+# 获取服务当前版本
 get_current_version() {
     local host=$1
     local service=$2
-    local command="${install_path%/}/${service}/bin/show_${service}_version.sh"
-    local show_version=$(remote_exec "$host" "$command")
-    if [ -n "$show_version" ];then
-        if [ "$service" = "fe" ];then
-            echo "$show_version" | awk '/Build version/ { print $3 }'
-        elif [ "$service" = "be" ]; then
-            echo "$show_version" | head -n1
+    local command=""
+    local index=0
+    if [ "$service" = "fe" ];then
+        command="show frontends;"
+        index="NF"
+    elif [ "$service" = "be" ];then
+        index=19
+        command="show backends;"
+    fi
+    local result=$(mysql_command_exec_silent "$command")
+    if [ -n "$result" ];then
+        echo "$result" | grep "$host" | awk -F'\t' "{print \$$index}"
+    fi
+}
+
+# 获取当前集群所有FE节点ip
+get_fe_ip(){
+    local result=$(mysql_command_exec_silent "show frontends;")
+    if [ -n "$result" ];then
+        while read line; do
+            arr=($line)
+            ip=${arr[1]}
+            role=${arr[6]}
+            if [ "$role" = "LEADER" ]; then
+              leader_ip=$ip
+            else
+              fe_ip+=($ip)
+            fi
+        done <<< "$result"
+        #将leader节点放到最后处理
+        fe_ip+=("$leader_ip")
+    fi
+}
+
+# 创建新的元数据快照文件并等待元数据快照文件同步至其他 FE 节点
+create_image_file(){
+    log_info "Creating image file on $leader_ip"
+    local command=""
+    local key="sys_log_dir"
+    mysql_command_exec "ALTER SYSTEM CREATE IMAGE"
+    start_time=$(date +"%Y-%m-%d %H:%M:%S")
+    local count=36
+    local index=0
+    while [[ $index < $count ]]; do
+        log_info "Waiting for image file creation on $leader_ip"
+        # 检查leader节点的fe.log
+        if [ "${fe_configs[$key]+isset}" ];then
+            sys_log_dir="${fe_configs[$key]}"
+            fe_log_path="${sys_log_dir%/}/fe.log"
+        else
+            fe_log_path="${install_path%/}/fe/log/fe.INFO"
+        fi
+        command="awk '\$1\" \"\$2 >= \"$start_time\"' $fe_log_path | grep -q 'push image.*to other nodes'"
+        if remote_exec "$leader_ip" "$command"; then
+            log_info "Create image successfully"
+            break
+        else
+            sleep 5
+            index=$((index+1))
+        fi
+    done
+}
+# 检查升级版本
+check_upgrade_version() {
+    local current_version=$1
+    local target_version=$2
+    # 如果不是升级，直接返回错误
+    if [[ "$current_version" == "$upgrade_version" ]];then
+        log_info "Skip upgrade $host ${service^^}, current version $current_version is equal to upgrade version $upgrade_version"
+        return 1
+    fi
+    if echo -e "$current_version\n$target_version" | sort -V | head -n1 | grep -q "^${upgrade_version}$"; then
+        log_info "Skip upgrade $host ${service^^}, current version $current_version is greater than upgrade version $upgrade_version"
+        return 1
+    fi
+
+    # 提取版本号的各个部分
+    local curr_major=$(echo "$current_version" | cut -d. -f1)
+    local curr_minor=$(echo "$current_version" | cut -d. -f2)
+    local curr_patch=$(echo "$current_version" | cut -d. -f3)
+    local target_major=$(echo "$target_version" | cut -d. -f1)
+    local target_minor=$(echo "$target_version" | cut -d. -f2)
+    local target_patch=$(echo "$target_version" | cut -d. -f3)
+
+    # 重大版本升级规则检查
+    # v1.19 必须升级到 v2.0
+    if [ "$curr_major" = "1" ] && [ "$curr_minor" = "19" ] && \
+       ([ "$target_major" != "2" ] || [ "$target_minor" != "0" ]); then
+        log_error "Version 1.19 must be upgraded to version 2.0"
+        return 1
+    fi
+
+    # v2.5 必须升级到 v3.0
+    if [ "$curr_major" = "2" ] && [ "$curr_minor" = "5" ] && \
+       ([ "$target_major" != "3" ] || [ "$target_minor" != "0" ]); then
+        log_error "Version 2.5 must be upgraded to version 3.0"
+        return 1
+    fi
+
+    # 检查是否是跨大版本升级（major或minor版本不同）
+    if [ "$curr_major" != "$target_major" ] || [ "$curr_minor" != "$target_minor" ]; then
+        # 如果是从 2.0 以上版本升级，允许跨版本但给出警告
+        if [ "$curr_major" -ge "2" ]; then
+            local version_diff=$((target_major * 100 + target_minor - (curr_major * 100 + curr_minor)))
+            if [ "$version_diff" -gt "1" ]; then
+                log_info "WARNING: Upgrading across multiple major/minor versions from $current_version to $target_version"
+                log_info "Recommended upgrade path: upgrade through intermediate versions"
+            fi
+        else
+            # 2.0 之前的版本不允许跨版本升级
+            log_error "Cannot upgrade across major versions before v2.0"
+            return 1
         fi
     fi
+
+    log_info "Upgrade version from $current_version to $target_version is valid"
+    return 0
+}
+# 检查降级版本
+check_downgrade_version() {
+    local current_version=$1
+    local target_version=$2
+    # 如果不是降级，直接返回错误
+    if [[ "$current_version" == "$target_version" ]];then
+        log_info "Skip downgrade $host ${service^^}, current version $current_version is equal to downgrade version $target_version"
+        return 1
+    fi
+    if echo -e "$current_version\n$target_version" | sort -V | head -n1 | grep -q "^$current_version$"; then
+        log_info "Skip downgrade $host ${service^^}, current version $current_version is smaller than downgrade version $target_version"
+        return 1
+    fi
+
+    # 提取版本号的各个部分
+    local curr_major=$(echo "$current_version" | cut -d. -f1)
+    local curr_minor=$(echo "$current_version" | cut -d. -f2)
+    local curr_patch=$(echo "$current_version" | cut -d. -f3)
+    local target_major=$(echo "$target_version" | cut -d. -f1)
+    local target_minor=$(echo "$target_version" | cut -d. -f2)
+    local target_patch=$(echo "$target_version" | cut -d. -f3)
+
+    # 特殊规则：v3.3 不能降级到 v3.2.0-2
+    if [ "$curr_major" = "3" ] && [ "$curr_minor" = "3" ] && \
+       [ "$target_major" = "3" ] && [ "$target_minor" = "2" ] && \
+       [ "$target_patch" -lt "3" ]; then
+        log_error "Cannot downgrade from v3.3 to v3.2.0-2 directly due to metadata loss risk. Please use v3.2.3 or higher."
+        return 1
+    fi
+
+    # 特殊规则：v3.0 只能降级到 v2.5.3+
+    if [ "$curr_major" = "3" ] && [ "$curr_minor" = "0" ] && \
+       [ "$target_major" = "2" ] && \
+       ([ "$target_minor" -lt "5" ] || \
+       ([ "$target_minor" = "5" ] && [ "$target_patch" -lt "3" ])); then
+        log_error "Version 3.0 can only be downgraded to v2.5.3 or higher versions"
+        return 1
+    fi
+
+    # 特殊规则：不能直接降级到 v1.19
+    if [ "$target_major" = "1" ] && [ "$target_minor" = "19" ]; then
+        log_error "Cannot downgrade directly to v1.19. Must downgrade to v2.0 first"
+        return 1
+    fi
+
+    # 检查是否是跨大版本降级（major或minor版本不同）
+    if [ "$curr_major" != "$target_major" ] || [ "$curr_minor" != "$target_minor" ]; then
+        # 检查是否跨多个大版本
+        local version_diff=$((curr_major * 100 + curr_minor - (target_major * 100 + target_minor)))
+        if [ "$version_diff" -gt "1" ]; then
+            log_error "Cannot downgrade across multiple major/minor versions directly from $current_version to $target_version"
+            log_error "Please downgrade step by step through intermediate versions"
+            return 1
+        fi
+    fi
+
+    # 如果只是小版本降级，允许直接降级
+    log_info "Downgrade version from $current_version to $target_version is valid"
+    return 0
 }
