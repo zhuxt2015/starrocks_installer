@@ -5,14 +5,14 @@
 # 2. 分发config/be.conf中的配置到所有BE节点
 ###################################################
 set -eu
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/log.sh"
-source "$SCRIPT_DIR/common.sh"
 
 main() {
+    local SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/log.sh"
+    source "$SCRIPT_DIR/common.sh"
     #参数不等于1个直接退出脚本并提示用户用法
-    if [ $# -ne 1 ]; then
-        echo "Usage: $0 fe or $0 be"
+    if [ "$#" -ne 1 ]; then
+        log_error "Usage: $0 fe or $0 be"
         exit 1
     fi
     read_config
@@ -39,3 +39,4 @@ main() {
         log_error "Invalid argument: $1, Usage: $0 fe or $0 be"
     fi
 }
+main "$@"

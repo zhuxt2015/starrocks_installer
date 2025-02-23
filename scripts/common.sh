@@ -291,6 +291,7 @@ configure_fe() {
     for key in "${!fe_configs[@]}"; do
         value="${fe_configs[$key]}"
         if [ -n "$value" ]; then
+            log_info "Configuring FE $key = $value on $host"
             remote_script+="if grep -q \"^$key *= *\" \"\$conf_file\"; then "
             remote_script+="sed -i 's#^$key *= *.*#$key = $value#g' \"\$conf_file\"; "
             remote_script+="else echo \"$key = $value\" >> \"\$conf_file\"; fi; "
@@ -316,6 +317,7 @@ configure_be() {
     for key in "${!be_configs[@]}"; do
         value="${be_configs[$key]}"
         if [ -n "$value" ]; then
+            log_info "Configuring BE $key = $value on $host"
             remote_script+="if grep -q \"^$key *= *\" \"\$conf_file\"; then "
             remote_script+="sed -i 's#^$key *= *.*#$key = $value#g' \"\$conf_file\"; "
             remote_script+="else echo \"$key = $value\" >> \"\$conf_file\"; fi; "

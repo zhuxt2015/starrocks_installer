@@ -140,6 +140,18 @@ upgrade_version=3.3.10
 ./upgrade/upgrade_cluster.sh
 ```
 
+### 降级集群
+> - 滚动降级各个节点，建议先降级一个follower FE观察一下，再决定整体升级(修改downgrade/downgrade_cluster.sh，for循环中最后一行增加return 0)
+> - 先降级FE，然后降级BE, 先降级follower FE,再降级leader FE
+> - 降级过程中，FE leader节点会自动切换为FE follower节点
+```bash
+#第一步 修改降级版本号
+vim config.properties
+downgrade_version=3.3.5
+# 第二步 执行降级
+./downgrade/downgrade_cluster.sh
+```
+
 
 ### 卸载StarRocks
 > ⚠️ 注意：卸载操作将
