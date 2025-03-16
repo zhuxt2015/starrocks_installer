@@ -10,6 +10,8 @@ setup_config_file="$SCRIPT_DIR/../config/config.properties"
 hosts_config_file="$SCRIPT_DIR/../config/hosts.properties"
 fe_config_file="$SCRIPT_DIR/../config/fe.conf"
 be_config_file="$SCRIPT_DIR/../config/be.conf"
+remote_init_config="$SCRIPT_DIR/remote_init.sh"
+
 
 # 使用普通数组存储主机名列表
 declare -a host_list=()
@@ -200,6 +202,113 @@ check_file_exists() {
     remote_exec_sudo "$host" "[ -f $file ]" && return 0 || return 1
 }
 
+# 创建必要目录
+create_directories() {
+    local host=$1
+    local service=$2
+    local dirs=("${install_path%/}/${service}")
+    log_info "Checking and creating directories on $host"
+
+    if [ "$service" == "fe" ]; then
+        for key in "${!fe_configs[@]}"; do
+            value="${fe_configs[$key]}"
+            if [[ -n "$value" ]] && [[ ${key,,} =~ .*_dir$ ]]; then
+                dirs+=("${value}")
+            fi
+        done
+    else
+        for key in "${!be_configs[@]}"; do
+            value="${be_configs[$key]}"
+            if [[ -n "$value" ]];then
+                if [[ $key =~ .*_dir$ ]]; then
+                    dirs+=("${value}")
+                # 处理storage_root_path
+                elif [[ "$key" == "storage_root_path" ]];then
+                    IFS=';' read -ra storage_path <<< "$value"
+                    for path in "${storage_path[@]}"; do
+                        if [[ "$path" == *","* ]]; then
+                            path=$(echo "$path" | cut -d',' -f1)
+                        fi
+                        dirs+=("$path")
+                    done
+                fi
+            fi
+        done
+    fi
+    for dir in "${dirs[@]}"; do
+        log_info "Creating directory $dir on $host"
+        local commands=(
+            "rm -rf $dir"
+            "mkdir -p $dir"
+            "chown -R $install_user:$install_user $dir"
+            "chmod -R 755 $dir"
+        )
+
+        loop_remote_exec_sudo "$host" "${commands[@]}"
+
+    done
+}
+
+# 解压 StarRocks 包
+decompress_package() {
+    local host=$1
+    local service=$2
+
+    log_info "Decompressing StarRocks package on $host, please wait for about 1 minute"
+    local child_dir="StarRocks-${starrocks_version}-centos-amd64"
+    local commands=(
+        "rm -rf ${install_path%/}/$service"
+        "tar -xzf $install_package -C $install_path ${child_dir}/${service}"
+        "mv ${install_path%/}/${child_dir}/${service} $install_path"
+        "chown -R $install_user:$install_user $install_path"
+        "rm -rf ${install_path%/}/$child_dir"
+    )
+    loop_remote_exec_sudo "${host}" "${commands[@]}"
+}
+
+#创建服务service文件
+create_service() {
+    local host=$1
+    local service=$2
+    local service_name="starrocks_${service}"
+    local work_dir="${install_path%/}/${service}"
+    local start_script="$work_dir/bin/start_${service}.sh"
+    local stop_script="$work_dir/bin/stop_${service}.sh"
+    local service_file="/etc/systemd/system/${service_name}.service"
+
+    log_info "Creating systemd service file: $service_file"
+    cat <<EOF | remote_exec_sudo $host "tee $service_file >/dev/null"
+[Unit]
+Description=StarRocks ${service_name^^} Service
+After=network.target
+
+[Service]
+Environment=JAVA_HOME=$java_home
+User=$install_user
+Group=$install_user
+WorkingDirectory=$work_dir
+ExecStart=$start_script
+ExecStop=$stop_script
+LimitNOFILE=655350
+LimitNPROC=655350
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=180
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    log_info "$host Reloading systemd daemon..."
+    remote_exec_sudo "$host" "systemctl daemon-reload"
+
+    log_info "$host Enabling and starting $service_name service..."
+    remote_exec_sudo "$host" "systemctl enable $service_name"
+    remote_exec_sudo "$host" "systemctl start $service_name"
+    log_info "$host $service_name service setup complete."
+}
+
 #分发安装包
 distribute_install_file() {
     local host=$1
@@ -210,6 +319,31 @@ distribute_install_file() {
     fi
 
 }
+#将FE和BE加入到集群
+add_to_cluster() {
+    local host=$1
+    local node_type=$2
+    log_info "Add $node_type $host to cluster "
+    if [ "$host" != "$leader" ] && [ "$node_type" = "fe" ]; then
+        mysql -h $leader -uroot -P9030 -e "alter system add FOLLOWER '$host:$edit_log_port'"
+    elif [ "$node_type" = "be" ]; then
+        mysql -h $leader -uroot -P9030 -e "alter system add BACKEND '$host:$heartbeat_service_port'"
+    fi
+}
+#follower第一次启动
+follower_first_start() {
+    local host=$1
+    if [ "$host" != "$leader" ]; then
+        log_info "First start follower on $host"
+        cmd="source /etc/profile && sh $install_path/fe/bin/start_fe.sh --helper $leader:$edit_log_port --daemon"
+        sudo -u $install_user ssh $install_user@$host "$cmd"
+        if check_service_status "$host" "fe";then
+            stop_service "$host" "fe"
+        fi
+    fi
+
+}
+
 # 启动服务
 start_service() {
     local host=$1
@@ -336,7 +470,7 @@ download_package() {
         if check_directory "$package_path";then
             sudo mkdir -P $package_path && sudo chown -R $install_user:$install_user $package_path
         fi
-        wget -O $package_filename "${package_url%/}/$package_filename"
+        wget -O $package_filepath "${package_url%/}/$package_filename"
     else
         log_info "Install package already exists at $package_filepath"
     fi
@@ -379,6 +513,24 @@ get_current_version() {
         echo "$result" | grep "$host" | awk -F'\t' "{print \$$index}"
     fi
 }
+
+# 检查扩容的IP已经在集群中
+check_ip_in_cluster() {
+    local host=$1
+    local service=$2
+    local command=""
+    if [ "$service" = "fe" ];then
+        command="show frontends;"
+    elif [ "$service" = "be" ];then
+        command="show backends;"
+    fi
+    local result=$(mysql_command_exec_silent "$command")
+    if [ -n "$result" ] && echo "$result" | grep -q "$host"; then
+        log_error "节点 $host 已经在集群中"
+        return 1
+    fi
+}
+
 
 # 获取当前集群所有FE节点ip
 get_fe_ip(){
@@ -542,4 +694,193 @@ check_downgrade_version() {
     # 如果只是小版本降级，允许直接降级
     log_info "Downgrade version from $current_version to $target_version is valid"
     return 0
+}
+
+# 检查并创建主节点install_user的SSH密钥
+check_main_node_ssh_key() {
+    local main_node=$1
+    local user=$2
+    local password=$3
+    local use_sudo=$4
+    local root_password=$5
+    local install_user=$6
+    local port=${7:-22}
+
+    if [ "$(hostname -I | awk '{print $1}')" = "$main_node" ]; then
+        # 当前节点就是主节点
+        if ! sudo test -f "/home/$install_user/.ssh"; then
+            log_warn "Creating .ssh directory for $install_user..."
+            sudo mkdir -p "/home/$install_user/.ssh"
+            sudo chmod 700 "/home/$install_user/.ssh"
+            sudo chown "$install_user:$install_user" "/home/$install_user/.ssh"
+        fi
+
+        if ! sudo test -f "/home/$install_user/.ssh/id_rsa"; then
+            log_warn "SSH key not found for $install_user, generating..."
+            sudo -u "$install_user" ssh-keygen -t rsa -N "" -f "/home/$install_user/.ssh/id_rsa" || {
+                log_error "Failed to generate SSH key for $install_user"
+                exit 1
+            }
+            log_info "SSH key generated successfully for $install_user"
+        else
+            log_info "SSH key already exists for $install_user"
+        fi
+        #生成指纹添加到known_hosts
+        if ! grep "$main_node" /home/$install_user/.ssh/known_hosts;then
+            sudo -u "$install_user" ssh-keyscan -H "$main_node" | sudo tee -a "/home/$install_user/.ssh/known_hosts" 2>/dev/null
+        fi
+        PUB_KEY=$(sudo -u "$install_user" cat "/home/$install_user/.ssh/id_rsa.pub")
+    else
+        # 从远程主节点获取install_user的公钥
+        log_warn "Retrieving SSH public key from main node's $install_user..."
+        
+        if [ "$use_sudo" = "true" ] && [ -n "$password" ]; then
+            # 使用sudo模式
+            PUB_KEY=$(sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$main_node" "
+                sudo mkdir -p /home/$install_user/.ssh 2>/dev/null
+                sudo chmod 700 /home/$install_user/.ssh
+                sudo chown $install_user:$install_user /home/$install_user/.ssh
+                if ! sudo test -f /home/$install_user/.ssh/id_rsa ; then
+                    sudo -u $install_user ssh-keygen -t rsa -N \"\" -f /home/$install_user/.ssh/id_rsa
+                fi
+                sudo cat /home/$install_user/.ssh/id_rsa.pub
+            ")
+        elif [ -n "$root_password" ]; then
+            # 使用root模式，使用sshpass
+            PUB_KEY=$(sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$main_node" "
+                if ! sudo test -f /home/$install_user/.ssh/id_rsa ; then
+                    su - $install_user -c 'ssh-keygen -t rsa -N \"\" -f /home/$install_user/.ssh/id_rsa'
+                fi
+                cat /home/$install_user/.ssh/id_rsa.pub
+            ")
+        else
+            log_error "Neither sudo password nor root password provided for main node"
+            exit 1
+        fi
+
+        if [ -z "$PUB_KEY" ]; then
+            log_error "Failed to retrieve SSH public key from main node's $install_user"
+            exit 1
+        fi
+        log_info "Successfully retrieved SSH public key from main node's $install_user"
+    fi
+}
+
+# 检查主节点 install_user 是否对从节点 install_user 免密
+check_main_node_passwordless() {
+    local main_node=$1
+    local worker_node=$2
+    local install_user=$3
+
+    if [ "$(hostname -I | awk '{print $1}')" = "$main_node" ]; then
+        # 在主节点上执行，直接用install_user测试
+        sudo -u "$install_user" ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$install_user@$worker_node" "exit" &>/dev/null
+    fi
+
+    if [ $? -eq 0 ]; then
+        log_info "Passwordless SSH is already set up from $install_user@$main_node to $install_user@$worker_node"
+        return 0
+    else
+        log_warn "Passwordless SSH is NOT set up from $install_user@$main_node to $install_user@$worker_node, proceeding with configuration."
+        return 1
+    fi
+}
+
+# 配置单台服务器
+setup_server() {
+    local host=$1
+    local port=$2
+    local user=$3
+    local password=$4
+    local root_password=$5
+    local use_sudo=$6
+    local install_user=$7
+    local main_node=$8
+    PUB_KEY=""
+
+    echo -e "\nConfiguring server: $host"
+    if check_main_node_passwordless "$main_node" "$host" "$install_user"; then
+       return 0
+    fi
+    if [ "$use_sudo" = "true" ] && [ -n "$password" ]; then
+        echo "Using sudo mode for $host"
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "sudo /usr/sbin/useradd -m $install_user 2>/dev/null || true"
+        # 确保我们有主节点install_user的公钥
+        if [ -z "$PUB_KEY" ]; then
+            check_main_node_ssh_key "$main_node" "$user" "$password" "$use_sudo" "$root_password" "$install_user" "$port"
+        fi
+        local commands="sudo mkdir -p /home/$install_user/.ssh && \
+    echo '$PUB_KEY' |sudo tee /home/$install_user/.ssh/authorized_keys && \
+    sudo chown -R $install_user:$install_user /home/$install_user/.ssh && \
+    sudo chmod 700 /home/$install_user/.ssh && \
+    sudo chmod 600 /home/$install_user/.ssh/authorized_keys && \
+    echo '$install_user ALL=(ALL) NOPASSWD: ALL' |sudo tee -a /etc/sudoers &>/dev/null"
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "$commands"
+
+    elif [ "$use_sudo" = "false" ] && [ -n "$root_password" ]; then
+        echo "Using root mode for $host"
+        sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$host" "sudo /usr/sbin/useradd -m $install_user 2>/dev/null || true"
+        # 确保我们有主节点install_user的公钥
+        if [ -z "$PUB_KEY" ]; then
+            check_main_node_ssh_key "$main_node" "$user" "$password" "$use_sudo" "$root_password" "$install_user" "$port"
+        fi
+        local commands="sudo mkdir -p /home/$install_user/.ssh && \
+    echo '$PUB_KEY' |sudo tee /home/$install_user/.ssh/authorized_keys && \
+    sudo chown -R $install_user:$install_user /home/$install_user/.ssh && \
+    sudo chmod 700 /home/$install_user/.ssh && \
+    sudo chmod 600 /home/$install_user/.ssh/authorized_keys && \
+    echo '$install_user ALL=(ALL) NOPASSWD: ALL' |sudo tee -a /etc/sudoers &>/dev/null"
+        sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$host" "$commands"
+    else
+        log_error "Neither sudo password nor root password provided for $host"
+        exit 1
+    fi
+}
+
+# 远程执行环境初始化
+remote_init() {
+    host=$1
+    log_info "Starting initialization on node: $host"
+
+    # 复制初始化脚本到远程主机
+    remote_exec_sudo $host "cat > /tmp/remote_init.sh" < "$remote_init_config"
+
+    # 在远程主机上执行初始化脚本
+    remote_exec_sudo "$host" "bash /tmp/remote_init.sh"
+
+    # 清理临时文件
+    # remote_exec_sudo "$host" "rm -f /tmp/remote_init.sh"
+
+    log_info "System initialization completed on $host"
+}
+# 检查环境初始化
+check_init_status() {
+    local host=$1
+    log_info "Checking initialization status on $host"
+
+    # 检查项目列表
+    local checks=(
+        "grep 'LANG=en_US.UTF-8' /etc/locale.conf"
+        "grep '* soft nofile 655350' /etc/security/limits.conf"
+        "grep 'SELINUX=disabled' /etc/selinux/config"
+        "cat /sys/kernel/mm/transparent_hugepage/enabled | grep '\\[never\\]'"
+        "/usr/sbin/sysctl -n vm.swappiness | grep '^0$'"
+        "grep 'net.ipv4.tcp_abort_on_overflow=1' /etc/sysctl.conf"
+        "systemctl status firewalld | grep 'inactive'"
+        "which java"
+        "systemctl status ntpd | grep 'active'"
+    )
+
+    for check in "${checks[@]}"; do
+        if ! remote_exec_sudo "$host" "$check" >/dev/null 2>&1; then
+            log_warn "[$host] Check failed: $check"
+        fi
+    done
+}
+# 打印集群信息
+print_cluster_info(){
+    # 打印集群信息
+    log_info "StarRocks cluster information:"
+    mysql_command_exec "show frontends;show backends;"
+
 }

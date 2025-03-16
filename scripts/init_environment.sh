@@ -11,46 +11,6 @@ source "$SCRIPT_DIR/log.sh"
 source "$SCRIPT_DIR/common.sh"
 
 
-remote_init() {
-    host=$1
-    log_info "Starting initialization on node: $host"
-
-    # 复制初始化脚本到远程主机
-    remote_exec_sudo $host "cat > /tmp/remote_init.sh" < "$remote_init_config"
-
-    # 在远程主机上执行初始化脚本
-    remote_exec_sudo "$host" "bash /tmp/remote_init.sh"
-
-    # 清理临时文件
-    # remote_exec_sudo "$host" "rm -f /tmp/remote_init.sh"
-
-    log_info "System initialization completed on $host"
-}
-
-check_init_status() {
-    local host=$1
-    log_info "Checking initialization status on $host"
-
-    # 检查项目列表
-    local checks=(
-        "grep 'LANG=en_US.UTF-8' /etc/locale.conf"
-        "grep '* soft nofile 655350' /etc/security/limits.conf"
-        "grep 'SELINUX=disabled' /etc/selinux/config"
-        "cat /sys/kernel/mm/transparent_hugepage/enabled | grep '\\[never\\]'"
-        "/usr/sbin/sysctl -n vm.swappiness | grep '^0$'"
-        "grep 'net.ipv4.tcp_abort_on_overflow=1' /etc/sysctl.conf"
-        "systemctl status firewalld | grep 'inactive'"
-        "which java"
-        "systemctl status ntpd | grep 'active'"
-    )
-
-    for check in "${checks[@]}"; do
-        if ! remote_exec_sudo "$host" "$check" >/dev/null 2>&1; then
-            log_warn "[$host] Check failed: $check"
-        fi
-    done
-}
-
 # 主函数
 main() {
     log_info "Starting StarRocks initialization and checking process..."

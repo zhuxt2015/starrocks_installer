@@ -336,7 +336,7 @@ function main()
     fi
 
     #安装jdk
-	  echo "begin install jdk"
+	echo "begin install jdk"
     install_jdk
     if [ $? -ne 0 ]; then
         return 1
