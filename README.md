@@ -167,12 +167,14 @@ downgrade_version=3.3.5
 
 ## 操作命令
 ### 集群管理
-| 操作 | 命令                                 
+| 操作   | 命令                                 
 |------|------------------------------------|
 | 启动集群 | `./start_cluster.sh`               |
 | 停止集群 | `./stop_cluster.sh`                |
-| 升级集群 | `./upgrade/upgrade_cluster.sh`        |
+| 升级集群 | `./upgrade/upgrade_cluster.sh`     |
 | 降级集群 | `./downgrade/downgrade_cluster.sh` |
+| 扩容节点 | `./scala/scale_all.sh`             |
+| 缩容节点 | `./shrink/shrink_all.sh`           |
 | 配置分发 | `./scripts/config_distribution.sh` |
 
 
@@ -213,16 +215,12 @@ yum_repo_url=http://mirrors.aliyun.com/repo/Centos-7.repo
 starrocks_download_url=https://releases.mirrorship.cn/starrocks/
 #starrocks版本
 starrocks_version=3.3.5
+#starrocks安装包名称
+package_filename=StarRocks-${starrocks_version}-centos-amd64.tar.gz
 #安装包存放路径
 package_path=/tmp/
 #starrocks安装路径
 install_path=/opt/test_sr/
-#fe配置文件路径
-fe_conf_path=/opt/test_sr/fe/conf/fe.conf
-#be配置文件路径
-be_conf_path=/opt/test_sr/be/conf/be.conf
-#be存储路径
-storage_root_path=/data/storage,medium:HDD
 #yum安装jdk包名
 jdk_package=java-11-openjdk-devel.x86_64
 #java home路径
@@ -238,6 +236,14 @@ fe_root_password=
 upgrade_version=3.3.10
 #starrocks升级包文件路径
 downgrade_version=3.3.5
+# FE扩容节点IP列表，多个IP用逗号分隔
+scale_fe_ips=192.168.1.11,192.168.1.12
+# BE扩容节点IP列表，多个IP用逗号分隔
+scale_be_ips=192.168.1.21,192.168.1.22
+# FE缩容节点IP列表，多个IP用逗号分隔
+shrink_fe_ips=192.168.1.11,192.168.1.12
+# BE缩容节点IP列表，多个IP用逗号分隔
+shrink_be_ips=192.168.1.21,192.168.1.22
 ```
 
 ### hosts.properties主机配置

@@ -47,7 +47,7 @@ function main() {
         #停止服务
         stop_service "$frontend_host" "fe"
         #分发安装包
-        distribute_install_file "$frontend_host" "$install_package"
+        distribute_install_file "$frontend_host"
         #创建目录
         create_directories "$frontend_host" "fe"
         #解压安装包
@@ -64,6 +64,7 @@ function main() {
     done
     
     log_info "FE扩容完成"
+    print_cluster_info
     return 0
 }
 

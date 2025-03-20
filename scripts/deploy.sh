@@ -38,7 +38,7 @@ main() {
         for frontend_host in "${frontend_hosts[@]}"; do
             log_info "Installing FE on $frontend_host"
             stop_service "$frontend_host" "fe"
-            distribute_install_file "$frontend_host" "$install_package"
+            distribute_install_file "$frontend_host"
             create_directories "$frontend_host" "fe"
             decompress_package "$frontend_host" "fe"
             add_to_cluster "$frontend_host" "fe"
@@ -56,7 +56,7 @@ main() {
         for backend_host in "${BACKENDS[@]}"; do
             log_info "Installing BE on $backend_host"
             stop_service "$backend_host" "be"
-            distribute_install_file "$backend_host" "$install_package"
+            distribute_install_file "$backend_host"
             create_directories "$backend_host" "be"
             decompress_package "$backend_host" "be"
             add_to_cluster "$backend_host" "be"

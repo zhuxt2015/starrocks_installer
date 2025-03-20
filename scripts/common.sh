@@ -27,8 +27,8 @@ main_node=""
 # 检查文件是否存在
 check_file() {
     if [[ ! -f "$1" ]]; then
-        log_error "Config file not found:: $1"
-        exit 1
+        log_error "file not found:: $1"
+        return 1
     fi
 }
 # 检查文件是否存在
@@ -109,6 +109,8 @@ read_config() {
         value=$(echo "$value" | tr -d ' ')
         eval "$key='$value'"
     done < "$setup_config_file"
+    #使用sed替换package_filename=StarRocks-${starrocks_version}-centos-amd64.tar.gz中的${starrocks_version}
+    package_filename=$(sed -e "s/\${starrocks_version}/${starrocks_version}/g" <<<"$package_filename")
 }
 
 # 读取安装配置
@@ -258,7 +260,7 @@ decompress_package() {
     local child_dir="StarRocks-${starrocks_version}-centos-amd64"
     local commands=(
         "rm -rf ${install_path%/}/$service"
-        "tar -xzf $install_package -C $install_path ${child_dir}/${service}"
+        "tar -xzf $package_filepath -C $install_path ${child_dir}/${service}"
         "mv ${install_path%/}/${child_dir}/${service} $install_path"
         "chown -R $install_user:$install_user $install_path"
         "rm -rf ${install_path%/}/$child_dir"
@@ -312,10 +314,9 @@ EOF
 #分发安装包
 distribute_install_file() {
     local host=$1
-    local install_package=$2
     log_info "Distribute StarRocks package to $host"
-    if ! check_file_exists "$host" "$install_package"; then
-        sudo -u "$install_user" scp "$install_package" "$install_user@$host:$install_package"
+    if ! check_file_exists "$host" "$package_filepath"; then
+        sudo -u "$install_user" scp "$package_filepath" "$install_user@$host:$package_filepath"
     fi
 
 }
@@ -470,7 +471,7 @@ download_package() {
         if check_directory "$package_path";then
             sudo mkdir -P $package_path && sudo chown -R $install_user:$install_user $package_path
         fi
-        wget -O $package_filepath "${package_url%/}/$package_filename"
+        wget -O $package_filepath "${starrocks_download_url%/}/$package_filename"
     else
         log_info "Install package already exists at $package_filepath"
     fi
@@ -485,7 +486,7 @@ mysql_command_exec(){
     fi
 }
 
-# 执行mysql命令,
+# 执行mysql命令 静默执行
 mysql_command_exec_silent(){
     local command=$1
     if [ -n "$fe_root_password" ];then

@@ -27,4 +27,3 @@ DURATION=$((END_TIME - START_TIME))
 MINUTES=$((DURATION / 60))
 SECONDS=$((DURATION % 60))
 log_info "Total scale time: ${MINUTES}m${SECONDS}s"
-print_cluster_info

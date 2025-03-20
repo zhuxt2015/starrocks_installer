@@ -8,6 +8,7 @@ function main() {
 
     read_config
     read_hosts_config
+    read_fe_config
     read_be_config
 
     # 检查参数
@@ -42,7 +43,7 @@ function main() {
         remote_init "$backend_host"
         check_init_status "$backend_host"
         stop_service "$backend_host" "be"
-        distribute_install_file "$backend_host" "$install_package"
+        distribute_install_file "$backend_host"
         create_directories "$backend_host" "be"
         decompress_package "$backend_host" "be"
         add_to_cluster "$backend_host" "be"
@@ -53,6 +54,7 @@ function main() {
     done
     
     log_info "BE扩容完成"
+    print_cluster_info
     return 0
 }
 

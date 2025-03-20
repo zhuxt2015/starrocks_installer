@@ -39,7 +39,7 @@ EOF
                 continue
             fi
             log_info "Upgrade $host ${service^^} from version $current_version to version $upgrade_version"
-            distribute_install_file "$host" "$package_filepath"
+            distribute_install_file "$host"
             stop_service "$host" "$service"
             tar_sub_dir=${package_filename%.tar.gz}
             service_path="${install_path%/}/$service"
