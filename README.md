@@ -1,9 +1,11 @@
-# StarRocks一键安装指南
-> 💡 提示：本工具特别适合以下场景:
-> - 快速搭建测试/开发环境
-> - 评估新版本特性
-> - 临时部署验证概念
-> - 学习和熟悉StarRocks
+# [StarRocks](https://github.com/StarRocks/starrocks)一键安装指南
+StarRocks 是一款高性能分析型数据仓库，使用向量化、MPP 架构、CBO、智能物化视图、可实时更新的列式存储引擎等技术实现多维、实时、高并发的数据分析。[官方文档](https://docs.starrocks.io/zh/docs/introduction/StarRocks_intro/)
+
+💡 提示：本工具特别适合以下场景:
+- 快速搭建测试/开发环境
+- 评估新版本特性
+- 临时部署验证概念
+- 学习和熟悉StarRocks
 
 ![demo.gif](https://github.com/user-attachments/assets/31d79995-a256-44a2-b078-bd2d9e47492f)
 
