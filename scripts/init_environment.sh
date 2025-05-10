@@ -20,7 +20,7 @@ main() {
     read_hosts_config && read_config
     sed -i "s/^repo_domain=.*/repo_domain=${repo_domain}/" "$remote_init_config"
     sed -i "s#^yum_repo_url=.*#yum_repo_url=${yum_repo_url}#" "$remote_init_config"
-    sed -i "s/^ntp_server_ip=.*/ntp_server_ip=${leader}/" "$remote_init_config"
+    sed -i "s/^ntp_server_ip=.*/ntp_server_ip=${ntp_server_ip}/" "$remote_init_config"
     sed -i "s/^jdk_package=.*/jdk_package=${jdk_package}/" "$remote_init_config"
     sed -i "s#^java_home=.*#java_home=${java_home}#" "$remote_init_config"
 
@@ -28,6 +28,13 @@ main() {
     for node in "${host_list[@]}"; do
         log_info "Processing node: $node"
         remote_init "$node"
+        # 主节点安装mysql client
+        if [ "$node" = "$main_node" ]; then
+            log_info "Installing mysql client on the master node..."
+            if ! command -v mysql &> /dev/null;then
+                yum install -y mysql > /dev/null
+            fi
+        fi
         check_init_status "$node"
     done
 

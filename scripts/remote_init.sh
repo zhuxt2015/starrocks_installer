@@ -174,24 +174,34 @@ function set_umask()
 function set_ntpd()
 {
     if ! rpm -q ntp &> /dev/null;then
-        yum install ntp -y
+        yum install ntp -y > /dev/null
     fi
-		sed -i 's/^server 0.centos.pool.ntp.org iburst/#server 0.centos.pool.ntp.org iburst/' /etc/ntp.conf
-		sed -i 's/^server 1.centos.pool.ntp.org iburst/#server 1.centos.pool.ntp.org iburst/' /etc/ntp.conf
-		sed -i 's/^server 2.centos.pool.ntp.org iburst/#server 2.centos.pool.ntp.org iburst/' /etc/ntp.conf
-		sed -i 's/^server 3.centos.pool.ntp.org iburst/#server 3.centos.pool.ntp.org iburst/' /etc/ntp.conf
-		if ! grep -q "server ${ntp_server_ip} prefer" /etc/ntp.conf
-		then
-		    echo "server ${ntp_server_ip} prefer" >> /etc/ntp.conf
-		fi
-		systemctl enable ntpd
+    ip=`ifconfig -a|grep inet|grep -v 127.0.0.1|grep -v inet6|awk '{print $2}'|grep 10.|head -1`
+	sed -i 's/^server 0.centos.pool.ntp.org iburst/#server 0.centos.pool.ntp.org iburst/' /etc/ntp.conf
+	sed -i 's/^server 1.centos.pool.ntp.org iburst/#server 1.centos.pool.ntp.org iburst/' /etc/ntp.conf
+	sed -i 's/^server 2.centos.pool.ntp.org iburst/#server 2.centos.pool.ntp.org iburst/' /etc/ntp.conf
+	sed -i 's/^server 3.centos.pool.ntp.org iburst/#server 3.centos.pool.ntp.org iburst/' /etc/ntp.conf
+	if [ "$ip" != "${ntp_server_ip}" ]  && ! grep -q "server ${ntp_server_ip}" /etc/ntp.conf
+	then
+	    echo "server ${ntp_server_ip} prefer" >> /etc/ntp.conf
+	elif [ "$ip" == "${ntp_server_ip}" ]
+	then
+	    if ! grep -q "^server 127.127.1.0" /etc/ntp.conf
+	    then
+	        echo "server 127.127.1.0 " >> /etc/ntp.conf
+	    fi
+	    if ! grep -q "^fudge 127.127.1.0 stratum 10" /etc/ntp.conf
+	    then
+	        echo "fudge 127.127.1.0 stratum 10 " >> /etc/ntp.conf
+	    fi
+	fi
+	#关闭chronyd
     if command -v /usr/sbin/chronyd &> /dev/null;then
       echo "chrony already installed, disable chrony"
       systemctl stop chronyd
       systemctl disable chronyd
     fi
-    #手动同步一次时间
-    /usr/sbin/ntpdate -u $ntp_server_ip
+    systemctl enable ntpd
     systemctl start ntpd
     systemctl enable ntpd
 }
@@ -213,10 +223,10 @@ function off_firewall()
 
 function install_jdk()
 {
-    #yum install jdk
+    #install jdk
     if [ ! -d "$java_home" ]; then
 	      echo "java is not installed,start to install java"
-	      yum install -y $jdk_package
+	      yum install -y $jdk_package > /dev/null
 	  fi
 
     #set environment
@@ -250,17 +260,6 @@ function update_yum_repo()
             yum clean all
             echo "yum repo update succeed!"
         fi
-    fi
-}
-
-###################################################
-# 安装Mysql client
-###################################################
-
-function install_mysql_client()
-{
-    if ! command -v mysql &> /dev/null;then
-        yum install -y mysql
     fi
 }
 
