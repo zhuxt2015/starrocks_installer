@@ -11,6 +11,7 @@ hosts_config_file="$SCRIPT_DIR/../config/hosts.properties"
 fe_config_file="$SCRIPT_DIR/../config/fe.conf"
 be_config_file="$SCRIPT_DIR/../config/be.conf"
 remote_init_config="$SCRIPT_DIR/remote_init.sh"
+disk_mount_file="$SCRIPT_DIR/disk_mount.sh"
 
 
 # 使用普通数组存储主机名列表
@@ -41,59 +42,34 @@ check_directory() {
 # 读取主机配置
 read_hosts_config() {
     check_file "$hosts_config_file"
-
-    local host="" port="" user="" password="" root_password="" use_sudo=""
     local first_host=true
 
-    while IFS='=' read -r key value || [ -n "$key" ]; do
-        [[ $key =~ ^[[:space:]]*# ]] && continue
-        [ -z "$key" ] && continue
-
-        key=$(echo "$key" | tr -d ' ')
-        value=$(echo "$value" | tr -d ' ')
-
-        case "$key" in
-            "host")
-                # 保存当前配置（如果有的话）
-                if [ -n "$host" ]; then
-                    server_configs["${host}_port"]=$port
-                    server_configs["${host}_user"]=$user
-                    server_configs["${host}_password"]=$password
-                    server_configs["${host}_root_password"]=$root_password
-                    server_configs["${host}_use_sudo"]=$use_sudo
-                fi
-
-                if [ "$first_host" = true ]; then
-                    main_node=$value
-                    first_host=false
-                    log_info "Main node is set to $main_node"
-                fi
-
-                # 记录新的主机
-                host=$value
-                host_list+=("$value")
-                port="22"  # 默认端口
-                user=""
-                password=""
-                root_password=""
-                use_sudo=""
-                ;;
-            "port") port=$value ;;
-            "user") user=$value ;;
-            "password") password=$value ;;
-            "root_password") root_password=$value ;;
-            "use_sudo") use_sudo=$value ;;
-        esac
-    done < "$hosts_config_file"
-
-    # 保存最后一个服务器的配置
-    if [ -n "$host" ]; then
-        server_configs["${host}_port"]=$port
-        server_configs["${host}_user"]=$user
-        server_configs["${host}_password"]=$password
-        server_configs["${host}_root_password"]=$root_password
-        server_configs["${host}_use_sudo"]=$use_sudo
-    fi
+    # 使用进程替换而不是管道
+    while IFS=',' read -r host port normal_user normal_pass root_pass; do
+        # 去除每个字段前后空格
+        host=$(echo "$host" | xargs)
+        port=$(echo "$port" | xargs)
+        normal_user=$(echo "$normal_user" | xargs)
+        normal_pass=$(echo "$normal_pass" | xargs)
+        root_pass=$(echo "$root_pass" | xargs)
+        # 设置默认端口
+        if [ -z "$port" ]; then
+            port="22"
+        fi
+        if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            host_list+=("$host")
+            #echo "host=$host port=$port user=$normal_user password=$normal_pass root_password=$root_pass"
+            server_configs["${host}_port"]=$port
+            server_configs["${host}_user"]=$normal_user
+            server_configs["${host}_password"]=$normal_pass
+            server_configs["${host}_root_password"]=$root_pass
+        fi
+        if [ "$first_host" = true ]; then
+            main_node=$host
+            first_host=false
+            log_info "Main node is set to $main_node"
+        fi
+    done < <(grep -v '^#' "$hosts_config_file" | grep -v '^$')
 }
 
 # 读取安装配置
@@ -157,7 +133,7 @@ remote_exec_sudo() {
     local host=$1
     local cmd=$2
     if ! sudo -u "$install_user" ssh "$install_user"@"$host" "source /etc/profile;sudo $cmd"; then
-        log_warn "[$host] command failed: sudo $cmd"
+        #log_warn "[$host] command failed: sudo $cmd"
         return 1
     fi
 }
@@ -384,7 +360,7 @@ stop_service() {
 check_service_status() {
     local host=$1
     local node_type=$2
-    local count=10
+    local count=30
     log_info "Checking $node_type status on $host"
 
     if [ "$node_type" = "fe" ]; then
@@ -392,7 +368,8 @@ check_service_status() {
             if remote_exec_sudo "$host" "ss -tnlp | grep -q $query_port"; then
                 return 0
             fi
-            sleep 5
+            log_warn "$node_type is not running on $host, retrying..."
+            sleep 6
         done
         log_error "$node_type is not running on $host"
         return 1
@@ -702,10 +679,9 @@ check_main_node_ssh_key() {
     local main_node=$1
     local user=$2
     local password=$3
-    local use_sudo=$4
-    local root_password=$5
-    local install_user=$6
-    local port=${7:-22}
+    local root_password=$4
+    local install_user=$5
+    local port=${6:-22}
 
     if [ "$(hostname -I | awk '{print $1}')" = "$main_node" ]; then
         # 当前节点就是主节点
@@ -731,39 +707,6 @@ check_main_node_ssh_key() {
             sudo -u "$install_user" ssh-keyscan -H "$main_node" | sudo tee -a "/home/$install_user/.ssh/known_hosts" 2>/dev/null
         fi
         PUB_KEY=$(sudo -u "$install_user" cat "/home/$install_user/.ssh/id_rsa.pub")
-    else
-        # 从远程主节点获取install_user的公钥
-        log_warn "Retrieving SSH public key from main node's $install_user..."
-        
-        if [ "$use_sudo" = "true" ] && [ -n "$password" ]; then
-            # 使用sudo模式
-            PUB_KEY=$(sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$main_node" "
-                sudo mkdir -p /home/$install_user/.ssh 2>/dev/null
-                sudo chmod 700 /home/$install_user/.ssh
-                sudo chown $install_user:$install_user /home/$install_user/.ssh
-                if ! sudo test -f /home/$install_user/.ssh/id_rsa ; then
-                    sudo -u $install_user ssh-keygen -t rsa -N \"\" -f /home/$install_user/.ssh/id_rsa
-                fi
-                sudo cat /home/$install_user/.ssh/id_rsa.pub
-            ")
-        elif [ -n "$root_password" ]; then
-            # 使用root模式，使用sshpass
-            PUB_KEY=$(sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$main_node" "
-                if ! sudo test -f /home/$install_user/.ssh/id_rsa ; then
-                    su - $install_user -c 'ssh-keygen -t rsa -N \"\" -f /home/$install_user/.ssh/id_rsa'
-                fi
-                cat /home/$install_user/.ssh/id_rsa.pub
-            ")
-        else
-            log_error "Neither sudo password nor root password provided for main node"
-            exit 1
-        fi
-
-        if [ -z "$PUB_KEY" ]; then
-            log_error "Failed to retrieve SSH public key from main node's $install_user"
-            exit 1
-        fi
-        log_info "Successfully retrieved SSH public key from main node's $install_user"
     fi
 }
 
@@ -794,21 +737,30 @@ setup_server() {
     local user=$3
     local password=$4
     local root_password=$5
-    local use_sudo=$6
-    local install_user=$7
-    local main_node=$8
+    local install_user=$6
+    local main_node=$7
     PUB_KEY=""
 
     echo -e "\nConfiguring server: $host"
-    if check_main_node_passwordless "$main_node" "$host" "$install_user"; then
-       return 0
-    fi
-    if [ "$use_sudo" = "true" ] && [ -n "$password" ]; then
+    if [ -n "$password" ]; then
+        sudo_check="sudo -n true 2>/dev/null;"
+        if ! sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "$sudo_check"; then
+            if [ -z "$root_password" ];then
+                log_error "no root password, can not set sudo to user $user for $host"
+                exit 1
+            fi
+            # 设置sudo
+            set_sudo="echo '$root_password'| su - root -c \"echo '$user ALL=(ALL) NOPASSWD: ALL' |tee -a /etc/sudoers &>/dev/null\""
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "$set_sudo"
+        fi
         echo "Using sudo mode for $host"
         sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "sudo /usr/sbin/useradd -m $install_user 2>/dev/null || true"
+        if check_main_node_passwordless "$main_node" "$host" "$install_user"; then
+            return 0
+        fi
         # 确保我们有主节点install_user的公钥
         if [ -z "$PUB_KEY" ]; then
-            check_main_node_ssh_key "$main_node" "$user" "$password" "$use_sudo" "$root_password" "$install_user" "$port"
+            check_main_node_ssh_key "$main_node" "$user" "$password" "$root_password" "$install_user" "$port"
         fi
         local commands="sudo mkdir -p /home/$install_user/.ssh && \
     echo '$PUB_KEY' |sudo tee /home/$install_user/.ssh/authorized_keys && \
@@ -818,12 +770,25 @@ setup_server() {
     echo '$install_user ALL=(ALL) NOPASSWD: ALL' |sudo tee -a /etc/sudoers &>/dev/null"
         sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "$commands"
 
-    elif [ "$use_sudo" = "false" ] && [ -n "$root_password" ]; then
+    elif [ -n "$root_password" ]; then
+        #判断是否允许root登录
+        # 默认假设不允许密码登录
+        permit_root_login="no"
+        # 检查 sshd_config 中的 PermitRootLogin 设置
+        # 使用 grep 过滤掉注释行，然后查找 PermitRootLogin 指令，并获取其值
+        permit_root_login=$(grep -v '^\s*#' /etc/ssh/sshd_config 2>/dev/null | grep -E '^\s*PermitRootLogin\s+' 2>/dev/null | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
+        if [  "$permit_root_login" = "no" ];then
+            log_warn "root login is not allowed for $host, please allow root login or use sudo password"
+            exit 1
+        fi
         echo "Using root mode for $host"
         sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$host" "sudo /usr/sbin/useradd -m $install_user 2>/dev/null || true"
+        if check_main_node_passwordless "$main_node" "$host" "$install_user"; then
+            return 0
+        fi
         # 确保我们有主节点install_user的公钥
         if [ -z "$PUB_KEY" ]; then
-            check_main_node_ssh_key "$main_node" "$user" "$password" "$use_sudo" "$root_password" "$install_user" "$port"
+            check_main_node_ssh_key "$main_node" "$user" "$password" "$root_password" "$install_user" "$port"
         fi
         local commands="sudo mkdir -p /home/$install_user/.ssh && \
     echo '$PUB_KEY' |sudo tee /home/$install_user/.ssh/authorized_keys && \
@@ -832,8 +797,9 @@ setup_server() {
     sudo chmod 600 /home/$install_user/.ssh/authorized_keys && \
     echo '$install_user ALL=(ALL) NOPASSWD: ALL' |sudo tee -a /etc/sudoers &>/dev/null"
         sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$host" "$commands"
+
     else
-        log_error "Neither sudo password nor root password provided for $host"
+        log_error "Neither normal user password nor root password provided for $host"
         exit 1
     fi
 }
@@ -844,8 +810,12 @@ remote_init() {
     log_info "Starting initialization on node: $host"
 
     # 复制初始化脚本到远程主机
-    remote_exec_sudo $host "cat > /tmp/remote_init.sh" < "$remote_init_config"
+    remote_exec_sudo "$host" "cat > /tmp/remote_init.sh" < "$remote_init_config"
+    # 复制磁盘挂载脚本到远程主机
+    remote_exec_sudo "$host" "cat > /tmp/disk_mount.sh" < "$disk_mount_file"
 
+    # 远程执行磁盘挂载脚本
+    remote_exec_sudo "$host" "bash /tmp/disk_mount.sh"
     # 在远程主机上执行初始化脚本
     remote_exec_sudo "$host" "bash /tmp/remote_init.sh"
 
@@ -861,7 +831,7 @@ check_init_status() {
 
     # 检查项目列表
     local checks=(
-        "grep 'LANG=en_US.UTF-8' /etc/locale.conf"
+        "grep 'en_US.UTF-8' /etc/locale.conf"
         "grep '* soft nofile 655350' /etc/security/limits.conf"
         "grep 'SELINUX=disabled' /etc/selinux/config"
         "cat /sys/kernel/mm/transparent_hugepage/enabled | grep '\\[never\\]'"
