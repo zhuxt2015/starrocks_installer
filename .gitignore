@@ -1,0 +1,71 @@
+# 操作系统生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE 和编辑器文件
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 日志文件
+*.log
+logs/
+log/
+
+# 临时文件和缓存
+*.tmp
+*.temp
+.cache/
+tmp/
+temp/
+
+# StarRocks 相关文件
+# 安装包
+*.tar.gz
+*.zip
+StarRocks-*.tar.gz
+
+# 运行时文件
+*.pid
+*.lock
+
+# 配置文件中的敏感信息（如果有本地配置）
+config/local.properties
+config/*.local
+config/*_local.*
+
+# 数据目录
+data/
+storage/
+meta/
+spill/
+
+# 备份文件
+*.bak
+*.backup
+*~
+
+# 证书和密钥文件
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+
+# 编译产物
+*.class
+*.jar
+target/
+build/
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
