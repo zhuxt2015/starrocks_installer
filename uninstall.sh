@@ -104,7 +104,7 @@ main() {
         user="${server_configs[${host}_user]}"
         password="${server_configs[${host}_password]}"
         root_password="${server_configs[${host}_root_password]}"
-        use_sudo="${server_configs[${host}_use_sudo]}"
+        use_sudo="${server_configs[${host}_use_sudo]:-true}"
         # 删除安装用户
         sudo_remote_exec "$host" "$port" "$user" "$password" "$root_password" "$use_sudo" "$install_user" "/usr/sbin/userdel -r $install_user" || true
     done

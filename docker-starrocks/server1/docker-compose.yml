@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # MinIO 对象存储 (仅在 server1 部署)
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    hostname: minio
+    network_mode: host
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./data/minio:/data
+      - ./logs/minio:/opt/bitnami/minio/log
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  # FE1 节点 (Leader)
+  fe1:
+    image: starrocks/fe-ubuntu:3.3.17
+    container_name: starrocks-fe1
+    hostname: fe1
+    network_mode: host
+    environment:
+      - HOST_TYPE=IP
+    volumes:
+      - ../shared-config/fe/fe.conf:/opt/starrocks/fe/conf/fe.conf
+      - ./data/fe1:/opt/starrocks/fe/meta
+      - ./logs/fe1:/opt/starrocks/fe/log
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 8G
+
+  # CN1 节点
+  cn1:
+    image: starrocks/cn-ubuntu:3.3.17
+    container_name: starrocks-cn1
+    hostname: cn1
+    network_mode: host
+    environment:
+      - HOST_TYPE=IP
+    volumes:
+      - ../shared-config/cn/cn.conf:/opt/starrocks/cn/conf/cn.conf
+      - ./data/cn1:/opt/starrocks/cn/storage
+      - ./logs/cn1:/opt/starrocks/cn/log
+    depends_on:
+      - fe1
+      - minio
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 24G
+        reservations:
+          memory: 16G

@@ -7,8 +7,11 @@ set -eu
 repo_domain="mirrors.aliyun.com"
 yum_repo_url="http://mirrors.aliyun.com/repo/Centos-7.repo"
 ntp_server_ip="10.138.132.122"
-jdk_package="java-1.8.0-openjdk-devel.x86_64"
-java_home="/usr/lib/jvm/java-11-openjdk"
+install_ntp="true"
+setup_yum_repo="true"
+jdk_package="java-17-openjdk-devel.x86_64"
+java_major_version="17"
+java_home="/usr/lib/jvm/java-17-openjdk"
 
 ###################################################
 # 设置字符集为en_US.UTF8
@@ -39,41 +42,43 @@ function set_utf8()
 
 function set_limits()
 {
-	if ! grep -q "^* soft nofile" /etc/security/limits.conf
+	if ! grep -Fq "* soft nofile 655350" /etc/security/limits.conf
 	then
 		echo "* soft nofile 655350" >>/etc/security/limits.conf
 	fi
 
-	if ! grep -q "^* hard nofile" /etc/security/limits.conf
+	if ! grep -Fq "* hard nofile 655350" /etc/security/limits.conf
 	then
 		echo "* hard nofile 655350" >>/etc/security/limits.conf
 	fi
-	if ! grep -q "^* hard nproc" /etc/security/limits.conf
+	if ! grep -Fq "* hard nproc 65535" /etc/security/limits.conf
 	then
 		echo "* hard nproc 65535" >>/etc/security/limits.conf
 	fi
-	if ! grep -q "^* soft nproc" /etc/security/limits.conf
+	if ! grep -Fq "* soft nproc 65535" /etc/security/limits.conf
 	then
 		echo "* soft nproc 65535" >>/etc/security/limits.conf
 	fi
-	if ! grep -q "^* soft stack" /etc/security/limits.conf
+	if ! grep -Fq "* soft stack unlimited" /etc/security/limits.conf
 	then
 		echo "* soft stack unlimited" >>/etc/security/limits.conf
 	fi
-	if ! grep -q "^* hard stack" /etc/security/limits.conf
+	if ! grep -Fq "* hard stack unlimited" /etc/security/limits.conf
 	then
 		echo "* hard stack unlimited" >>/etc/security/limits.conf
 	fi
-	if ! grep -q "^* soft memlock" /etc/security/limits.conf
+	if ! grep -Fq "* soft memlock unlimited" /etc/security/limits.conf
 	then
 		echo "* soft memlock unlimited" >>/etc/security/limits.conf
 	fi
-	if ! grep -q "^* hard memlock" /etc/security/limits.conf
+	if ! grep -Fq "* hard memlock unlimited" /etc/security/limits.conf
 	then
 		echo "* hard memlock unlimited" >>/etc/security/limits.conf
 	fi
 
-	sed -i "s/4096/65535/g" /etc/security/limits.d/20-nproc.conf
+    if [ -f /etc/security/limits.d/20-nproc.conf ]; then
+        sed -i "s/4096/65535/g" /etc/security/limits.d/20-nproc.conf
+    fi
 }
 
 ###################################################
@@ -223,11 +228,21 @@ function off_firewall()
 
 function install_jdk()
 {
-    #install jdk
-    if [ ! -d "$java_home" ]; then
-	      echo "java is not installed,start to install java"
-	      yum install -y $jdk_package > /dev/null
-	  fi
+    local java_bin="$java_home/bin/java"
+    local installed_java_major=""
+
+    if [ -x "$java_bin" ]; then
+        installed_java_major=$("$java_bin" -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d. -f1)
+    fi
+
+    if [ ! -x "$java_bin" ] || [ "$installed_java_major" != "$java_major_version" ]; then
+        echo "java ${java_major_version} is not installed under $java_home, start to install $jdk_package"
+        yum install -y $jdk_package > /dev/null
+        if [ ! -x "$java_bin" ]; then
+            echo "java binary not found after package installation: $java_bin"
+            return 1
+        fi
+    fi
 
     #set environment
     if ! grep -q "^export JAVA_HOME=" /etc/profile
@@ -241,8 +256,8 @@ function install_jdk()
 
     #update environment
     #source /etc/profile
-    java -version
-    echo "jdk is installed !"
+    "$java_bin" -version
+    echo "jdk ${java_major_version} is installed!"
 }
 
 ###################################################
@@ -279,10 +294,14 @@ function main()
     fi
 
     #安装yum源
-    echo "begin update yum repo"
-    update_yum_repo
-    if [ $? -ne 0 ]; then
-        return 1
+    if [ "$setup_yum_repo" = "true" ]; then
+        echo "begin update yum repo"
+        update_yum_repo
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+    else
+        echo "skip update yum repo, setup_yum_repo=$setup_yum_repo"
     fi
 
     #修改系统限制参数
@@ -343,10 +362,14 @@ function main()
 
 
     #设置主机时间同步
-    echo "begin set ntpd"
-    set_ntpd
-    if [ $? -ne 0 ]; then
-        return 1
+    if [ "$install_ntp" = "true" ]; then
+        echo "begin set ntpd"
+        set_ntpd
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+    else
+        echo "skip set ntpd, install_ntp=$install_ntp"
     fi
 
     /usr/sbin/sysctl -p

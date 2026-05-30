@@ -21,7 +21,10 @@ main() {
     sed -i "s/^repo_domain=.*/repo_domain=${repo_domain}/" "$remote_init_config"
     sed -i "s#^yum_repo_url=.*#yum_repo_url=${yum_repo_url}#" "$remote_init_config"
     sed -i "s/^ntp_server_ip=.*/ntp_server_ip=${ntp_server_ip}/" "$remote_init_config"
+    sed -i "s/^install_ntp=.*/install_ntp=${install_ntp}/" "$remote_init_config"
+    sed -i "s/^setup_yum_repo=.*/setup_yum_repo=${setup_yum_repo}/" "$remote_init_config"
     sed -i "s/^jdk_package=.*/jdk_package=${jdk_package}/" "$remote_init_config"
+    sed -i "s/^java_major_version=.*/java_major_version=${java_major_version}/" "$remote_init_config"
     sed -i "s#^java_home=.*#java_home=${java_home}#" "$remote_init_config"
 
     # 对所有节点执行初始化和检查
@@ -32,7 +35,7 @@ main() {
         if [ "$node" = "$main_node" ]; then
             log_info "Installing mysql client on the master node..."
             if ! command -v mysql &> /dev/null;then
-                yum install -y mysql > /dev/null
+                sudo yum install -y mysql > /dev/null
             fi
         fi
         check_init_status "$node"

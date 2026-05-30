@@ -33,7 +33,7 @@ function main() {
         user="${server_configs[${frontend_host}_user]}"
         password="${server_configs[${frontend_host}_password]}"
         root_password="${server_configs[${frontend_host}_root_password]}"
-        use_sudo="${server_configs[${frontend_host}_use_sudo]}"
+        use_sudo="${server_configs[${frontend_host}_use_sudo]:-true}"
         
         log_info "Using configuration:"
         echo "Port: $port"

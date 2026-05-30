@@ -1,0 +1,210 @@
+version: '3.8'
+
+networks:
+  starrocks-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+services:
+  # MinIO 对象存储
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    hostname: minio
+    networks:
+      starrocks-net:
+        ipv4_address: 172.20.0.10
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./data/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # FE 节点 1 (Leader)
+  fe1:
+    image: starrocks/fe-ubuntu:3.3.17
+    container_name: starrocks-fe1
+    hostname: fe1
+    networks:
+      starrocks-net:
+        ipv4_address: 172.20.0.11
+    ports:
+      - "8030:8030"
+      - "9020:9020"
+      - "9030:9030"
+      - "9010:9010"
+    environment:
+      - HOST_TYPE=FQDN
+    volumes:
+      - ./config/fe/fe.conf:/opt/starrocks/fe/conf/fe.conf
+      - ./data/fe1:/opt/starrocks/fe/meta
+      - ./logs/fe1:/opt/starrocks/fe/log
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # FE 节点 2 (Follower)
+  fe2:
+    image: starrocks/fe-ubuntu:3.3.17
+    container_name: starrocks-fe2
+    hostname: fe2
+    networks:
+      starrocks-net:
+        ipv4_address: 172.20.0.12
+    ports:
+      - "8031:8030"
+      - "9021:9020"
+      - "9031:9030"
+      - "9011:9010"
+    environment:
+      - HOST_TYPE=FQDN
+    volumes:
+      - ./config/fe/fe.conf:/opt/starrocks/fe/conf/fe.conf
+      - ./data/fe2:/opt/starrocks/fe/meta
+      - ./logs/fe2:/opt/starrocks/fe/log
+    depends_on:
+      - fe1
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # FE 节点 3 (Follower)
+  fe3:
+    image: starrocks/fe-ubuntu:3.3.17
+    container_name: starrocks-fe3
+    hostname: fe3
+    networks:
+      starrocks-net:
+        ipv4_address: 172.20.0.13
+    ports:
+      - "8032:8030"
+      - "9022:9020"
+      - "9032:9030"
+      - "9012:9010"
+    environment:
+      - HOST_TYPE=FQDN
+    volumes:
+      - ./config/fe/fe.conf:/opt/starrocks/fe/conf/fe.conf
+      - ./data/fe3:/opt/starrocks/fe/meta
+      - ./logs/fe3:/opt/starrocks/fe/log
+    depends_on:
+      - fe1
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # CN 节点 1
+  cn1:
+    image: starrocks/cn-ubuntu:3.3.17
+    container_name: starrocks-cn1
+    hostname: cn1
+    networks:
+      starrocks-net:
+        ipv4_address: 172.20.0.21
+    ports:
+      - "8040:8040"
+      - "9060:9060"
+      - "8060:8060"
+    environment:
+      - HOST_TYPE=FQDN
+    volumes:
+      - ./config/cn/cn.conf:/opt/starrocks/cn/conf/cn.conf
+      - ./logs/cn1:/opt/starrocks/cn/log
+    depends_on:
+      - fe1
+      - minio
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 24G
+        reservations:
+          memory: 16G
+
+  # CN 节点 2
+  cn2:
+    image: starrocks/cn-ubuntu:3.3.17
+    container_name: starrocks-cn2
+    hostname: cn2
+    networks:
+      starrocks-net:
+        ipv4_address: 172.20.0.22
+    ports:
+      - "8041:8040"
+      - "9061:9060"
+      - "8061:8060"
+    environment:
+      - HOST_TYPE=FQDN
+    volumes:
+      - ./config/cn/cn.conf:/opt/starrocks/cn/conf/cn.conf
+      - ./logs/cn2:/opt/starrocks/cn/log
+    depends_on:
+      - fe1
+      - minio
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 24G
+        reservations:
+          memory: 16G
+
+  # CN 节点 3
+  cn3:
+    image: starrocks/cn-ubuntu:3.3.17
+    container_name: starrocks-cn3
+    hostname: cn3
+    networks:
+      starrocks-net:
+        ipv4_address: 172.20.0.23
+    ports:
+      - "8042:8040"
+      - "9062:9060"
+      - "8062:8060"
+    environment:
+      - HOST_TYPE=FQDN
+    volumes:
+      - ./config/cn/cn.conf:/opt/starrocks/cn/conf/cn.conf
+      - ./logs/cn3:/opt/starrocks/cn/log
+    depends_on:
+      - fe1
+      - minio
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 24G
+        reservations:
+          memory: 16G

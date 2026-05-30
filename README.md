@@ -28,6 +28,7 @@ StarRocks 是一款高性能分析型数据仓库，使用向量化、MPP 架构
 ## 支持版本
 | 版本    | 状态    |
 |-------|-------|
+| 3.5.x | ✅ 已支持 |
 | 3.x.x | ✅ 已测试 |
 | 2.x.x | 待测试   |
 
@@ -135,7 +136,7 @@ config/be.conf
 ```bash
 #第一步 修改升级版本号
 vim config.properties
-upgrade_version=3.3.10
+upgrade_version=3.5.0
 # 第二步 执行升级
 ./upgrade/upgrade_cluster.sh
 ```
@@ -147,7 +148,7 @@ upgrade_version=3.3.10
 ```bash
 #第一步 修改降级版本号
 vim config.properties
-downgrade_version=3.3.5
+downgrade_version=3.5.0
 # 第二步 执行降级
 ./downgrade/downgrade_cluster.sh
 ```
@@ -168,22 +169,22 @@ downgrade_version=3.3.5
 ### 集群管理
 | 操作   | 命令                                 
 |------|------------------------------------|
-| 启动集群 | `./start_cluster.sh`               |
-| 停止集群 | `./stop_cluster.sh`                |
-| 升级集群 | `./upgrade/upgrade_cluster.sh`     |
-| 降级集群 | `./downgrade/downgrade_cluster.sh` |
-| 扩容节点 | `./scala/scale_all.sh`             |
-| 缩容节点 | `./shrink/shrink_all.sh`           |
+| 启动集群 | `./cluster.sh start all`           |
+| 停止集群 | `./cluster.sh stop all`            |
+| 升级集群 | `./upgrade/upgrade.sh all`         |
+| 降级集群 | `./downgrade/downgrade.sh all`     |
+| 扩容节点 | `./scale/scale.sh all`             |
+| 缩容节点 | `./shrink/shrink.sh all`           |
 | 配置分发 | `./scripts/config_distribution.sh` |
 
 
 ### 服务管理
 | 操作 | 命令                                               |
 |------|--------------------------------------------------|
-| 启动服务 | `sudo systemctl start starrocks_fe/starrocks_be` |
-| 停止服务 | `sudo systemctl stop starrocks_fe/starrocks_be`           |
-| 重启服务 | `sudo systemctl restart starrocks_fe/starrocks_be`        |
-| 查看状态 | `sudo systemctl status starrocks_fe/starrocks_be`         |
+| 启动服务 | `./cluster.sh start fe` / `./cluster.sh start be` / `sudo systemctl start starrocks_fe/starrocks_be` |
+| 停止服务 | `./cluster.sh stop fe` / `./cluster.sh stop be` / `sudo systemctl stop starrocks_fe/starrocks_be` |
+| 重启服务 | `sudo systemctl restart starrocks_fe/starrocks_be` |
+| 查看状态 | `sudo systemctl status starrocks_fe/starrocks_be` |
 | 启用自启动 | `sudo systemctl enable starrocks_fe/starrocks_be`         |
 | 禁用自启动 | `sudo systemctl disable starrocks_fe/starrocks_be`        |
 
@@ -206,6 +207,12 @@ leader=10.138.132.122
 follower=10.138.132.106,10.138.132.124
 #be node
 backend=10.138.132.106,10.138.132.124,10.138.132.126
+#ntp server ip
+ntp_server_ip=10.138.132.122
+#是否安装并配置ntp
+install_ntp=true
+#是否配置yum仓库
+setup_yum_repo=true
 #yum 仓库域名
 repo_domain=mirrors.aliyun.com
 #yum repo文件下载地址
@@ -213,7 +220,7 @@ yum_repo_url=http://mirrors.aliyun.com/repo/Centos-7.repo
 #starrocks安装包下载地址
 starrocks_download_url=https://releases.mirrorship.cn/starrocks/
 #starrocks版本
-starrocks_version=3.3.5
+starrocks_version=3.5.0
 #starrocks安装包名称
 package_filename=StarRocks-${starrocks_version}-centos-amd64.tar.gz
 #安装包存放路径
@@ -221,9 +228,11 @@ package_path=/tmp/
 #starrocks安装路径
 install_path=/opt/test_sr/
 #yum安装jdk包名
-jdk_package=java-11-openjdk-devel.x86_64
+jdk_package=java-17-openjdk-devel.x86_64
+#JDK主版本
+java_major_version=17
 #java home路径
-java_home=/usr/lib/jvm/java-11-openjdk
+java_home=/usr/lib/jvm/java-17-openjdk
 ####################################非必选配置####################################
 #hdfs配置文件路径
 hdfs_site_file=/home/starrocks/hdfs-site.xml
@@ -232,9 +241,9 @@ core_site_file=/home/starrocks/core-site.xml
 #fe root密码
 fe_root_password=
 #starrocks升级包文件路径
-upgrade_version=3.3.10
+upgrade_version=3.5.0
 #starrocks升级包文件路径
-downgrade_version=3.3.5
+downgrade_version=3.5.0
 # FE扩容节点IP列表，多个IP用逗号分隔
 scale_fe_ips=192.168.1.11,192.168.1.12
 # BE扩容节点IP列表，多个IP用逗号分隔
@@ -247,36 +256,13 @@ shrink_be_ips=192.168.1.21,192.168.1.22
 
 ### hosts.properties主机配置
 ```properties
-# 使用普通用户+ sudo
-host=10.138.132.122
-port=22
-user=vmuser
-password=yili123!
-root_password=root_password
-use_sudo=true
-
-# 使用root用户
-host=10.138.132.126
-port=22
-user=vmuser
-password=yili123!
-root_password=root_password
-use_sudo=true
-
-# 同时配置sudo和root（优先使用sudo）
-host=10.138.132.124
-port=22
-user=vmuser
-password=yili123!
-root_password=root_password
-use_sudo=true
-
-host=10.138.132.106
-port=22
-user=vmuser
-password=yili123!
-root_password=root_password
-use_sudo=true
+# 每行格式:
+# host,port,normal_user,normal_user_password,root_password,use_sudo
+# 其中 use_sudo 可选，默认 true，兼容旧版 5 列格式
+10.138.132.122,22,vmuser,yili123!,root_password,true
+10.138.132.126,22,vmuser,yili123!,root_password,true
+10.138.132.124,22,vmuser,yili123!,root_password,true
+10.138.132.106,22,vmuser,yili123!,root_password,true
 ```
 ### fe.conf配置
 ```properties

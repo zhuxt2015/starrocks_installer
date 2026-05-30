@@ -34,7 +34,7 @@ main() {
         user="${server_configs[${host}_user]}"
         password="${server_configs[${host}_password]}"
         root_password="${server_configs[${host}_root_password]}"
-        use_sudo="${server_configs[${host}_use_sudo]}"
+        use_sudo="${server_configs[${host}_use_sudo]:-true}"
         
         log_info "Using configuration:"
         echo "Port: $port"

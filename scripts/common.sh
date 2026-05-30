@@ -45,16 +45,21 @@ read_hosts_config() {
     local first_host=true
 
     # 使用进程替换而不是管道
-    while IFS=',' read -r host port normal_user normal_pass root_pass; do
+    while IFS=',' read -r host port normal_user normal_pass root_pass use_sudo; do
         # 去除每个字段前后空格
         host=$(echo "$host" | xargs)
         port=$(echo "$port" | xargs)
         normal_user=$(echo "$normal_user" | xargs)
         normal_pass=$(echo "$normal_pass" | xargs)
         root_pass=$(echo "$root_pass" | xargs)
+        use_sudo=$(echo "${use_sudo:-}" | xargs)
         # 设置默认端口
         if [ -z "$port" ]; then
             port="22"
+        fi
+        # 默认使用 sudo 模式，兼容旧版 5 列 hosts.properties
+        if [ -z "$use_sudo" ]; then
+            use_sudo="true"
         fi
         if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             host_list+=("$host")
@@ -63,6 +68,7 @@ read_hosts_config() {
             server_configs["${host}_user"]=$normal_user
             server_configs["${host}_password"]=$normal_pass
             server_configs["${host}_root_password"]=$root_pass
+            server_configs["${host}_use_sudo"]=$use_sudo
         fi
         if [ "$first_host" = true ]; then
             main_node=$host
@@ -290,9 +296,17 @@ EOF
 #分发安装包
 distribute_install_file() {
     local host=$1
+    local local_package_filepath="$package_filepath"
     log_info "Distribute StarRocks package to $host"
     if ! check_file_exists "$host" "$package_filepath"; then
-        sudo -u "$install_user" scp "$package_filepath" "$install_user@$host:$package_filepath"
+        if ! sudo -u "$install_user" test -r "$local_package_filepath"; then
+            local temp_package_filepath="/tmp/$(basename "$package_filepath")"
+            log_warn "Package $local_package_filepath is not readable by $install_user, copying to $temp_package_filepath"
+            sudo cp "$local_package_filepath" "$temp_package_filepath"
+            sudo chown "$install_user:$install_user" "$temp_package_filepath"
+            local_package_filepath="$temp_package_filepath"
+        fi
+        sudo -u "$install_user" scp "$local_package_filepath" "$install_user@$host:$package_filepath"
     fi
 
 }
@@ -302,9 +316,9 @@ add_to_cluster() {
     local node_type=$2
     log_info "Add $node_type $host to cluster "
     if [ "$host" != "$leader" ] && [ "$node_type" = "fe" ]; then
-        mysql -h $leader -uroot -P9030 -e "alter system add FOLLOWER '$host:$edit_log_port'"
+        MYSQL_PWD="$fe_root_password" mysql -h $leader -uroot -P9030 -e "alter system add FOLLOWER '$host:$edit_log_port'"
     elif [ "$node_type" = "be" ]; then
-        mysql -h $leader -uroot -P9030 -e "alter system add BACKEND '$host:$heartbeat_service_port'"
+        MYSQL_PWD="$fe_root_password" mysql -h $leader -uroot -P9030 -e "alter system add BACKEND '$host:$heartbeat_service_port'"
     fi
 }
 #follower第一次启动
@@ -398,6 +412,7 @@ configure_fe() {
         log_error "FE configuration file not found on $host"
         return 1
     fi
+    remote_exec_sudo "$host" "chown -R $install_user:$install_user ${install_path%/}/fe && chmod u+rw ${install_path%/}/fe/conf/fe.conf"
     # 构造远程执行的 shell 命令
     remote_script="conf_file=\"$install_path/fe/conf/fe.conf\";"
     for key in "${!fe_configs[@]}"; do
@@ -406,7 +421,7 @@ configure_fe() {
             log_info "Configuring FE $key = $value on $host"
             remote_script+="if grep -q \"^$key *= *\" \"\$conf_file\"; then "
             remote_script+="sed -i 's#^$key *= *.*#$key = $value#g' \"\$conf_file\"; "
-            remote_script+="else echo \"$key = $value\" >> \"\$conf_file\"; fi; "
+            remote_script+="else printf '\n$key = $value\n' >> \"\$conf_file\"; fi; "
             commands+=("$remote_script")
         fi
     done
@@ -423,6 +438,7 @@ configure_be() {
         log_error "BE configuration file not found on $host"
         return 1
     fi
+    remote_exec_sudo "$host" "chown -R $install_user:$install_user ${install_path%/}/be && chmod u+rw ${install_path%/}/be/conf/be.conf"
 
     # 构造远程执行的 shell 命令
     remote_script="conf_file=\"$install_path/be/conf/be.conf\";"
@@ -432,7 +448,7 @@ configure_be() {
             log_info "Configuring BE $key = $value on $host"
             remote_script+="if grep -q \"^$key *= *\" \"\$conf_file\"; then "
             remote_script+="sed -i 's#^$key *= *.*#$key = $value#g' \"\$conf_file\"; "
-            remote_script+="else echo \"$key = $value\" >> \"\$conf_file\"; fi; "
+            remote_script+="else printf '\n$key = $value\n' >> \"\$conf_file\"; fi; "
             commands+=("$remote_script")
         fi
     done
@@ -457,7 +473,7 @@ download_package() {
 mysql_command_exec(){
     local command=$1
     if [ -n "$fe_root_password" ];then
-        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -e "$command"
+        MYSQL_PWD="$fe_root_password" mysql --connect_timeout=5 -uroot -h$leader -P$query_port -e "$command"
     else
         mysql --connect_timeout=5 -uroot -h$leader -P$query_port -e "$command"
     fi
@@ -467,7 +483,7 @@ mysql_command_exec(){
 mysql_command_exec_silent(){
     local command=$1
     if [ -n "$fe_root_password" ];then
-        mysql --connect_timeout=5 -uroot -h$leader -P$query_port -P$fe_root_password -sse "$command"
+        MYSQL_PWD="$fe_root_password" mysql --connect_timeout=5 -uroot -h$leader -P$query_port -sse "$command"
     else
         mysql --connect_timeout=5 -uroot -h$leader -P$query_port -sse "$command"
     fi
@@ -737,12 +753,13 @@ setup_server() {
     local user=$3
     local password=$4
     local root_password=$5
-    local install_user=$6
-    local main_node=$7
+    local use_sudo=${6:-true}
+    local install_user=$7
+    local main_node=$8
     PUB_KEY=""
 
     echo -e "\nConfiguring server: $host"
-    if [ -n "$password" ]; then
+    if [ "$use_sudo" = "true" ] && [ -n "$password" ]; then
         sudo_check="sudo -n true 2>/dev/null;"
         if ! sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "$sudo_check"; then
             if [ -z "$root_password" ];then
@@ -770,17 +787,7 @@ setup_server() {
     echo '$install_user ALL=(ALL) NOPASSWD: ALL' |sudo tee -a /etc/sudoers &>/dev/null"
         sshpass -p "$password" ssh -o StrictHostKeyChecking=no -p "$port" "$user@$host" "$commands"
 
-    elif [ -n "$root_password" ]; then
-        #判断是否允许root登录
-        # 默认假设不允许密码登录
-        permit_root_login="no"
-        # 检查 sshd_config 中的 PermitRootLogin 设置
-        # 使用 grep 过滤掉注释行，然后查找 PermitRootLogin 指令，并获取其值
-        permit_root_login=$(grep -v '^\s*#' /etc/ssh/sshd_config 2>/dev/null | grep -E '^\s*PermitRootLogin\s+' 2>/dev/null | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
-        if [  "$permit_root_login" = "no" ];then
-            log_warn "root login is not allowed for $host, please allow root login or use sudo password"
-            exit 1
-        fi
+    elif [ "$use_sudo" = "false" ] && [ -n "$root_password" ]; then
         echo "Using root mode for $host"
         sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$host" "sudo /usr/sbin/useradd -m $install_user 2>/dev/null || true"
         if check_main_node_passwordless "$main_node" "$host" "$install_user"; then
@@ -799,7 +806,7 @@ setup_server() {
         sshpass -p "$root_password" ssh -o StrictHostKeyChecking=no -p "$port" "root@$host" "$commands"
 
     else
-        log_error "Neither normal user password nor root password provided for $host"
+        log_error "Invalid SSH configuration for $host, please check user/password/root_password/use_sudo"
         exit 1
     fi
 }
@@ -832,15 +839,18 @@ check_init_status() {
     # 检查项目列表
     local checks=(
         "grep 'en_US.UTF-8' /etc/locale.conf"
-        "grep '* soft nofile 655350' /etc/security/limits.conf"
+        "grep -F '* soft nofile 655350' /etc/security/limits.conf"
         "grep 'SELINUX=disabled' /etc/selinux/config"
         "cat /sys/kernel/mm/transparent_hugepage/enabled | grep '\\[never\\]'"
         "/usr/sbin/sysctl -n vm.swappiness | grep '^0$'"
         "grep 'net.ipv4.tcp_abort_on_overflow=1' /etc/sysctl.conf"
         "systemctl status firewalld | grep 'inactive'"
         "which java"
-        "systemctl status ntpd | grep 'active'"
     )
+
+    if [ "${install_ntp:-true}" = "true" ]; then
+        checks+=("systemctl status ntpd | grep 'active'")
+    fi
 
     for check in "${checks[@]}"; do
         if ! remote_exec_sudo "$host" "$check" >/dev/null 2>&1; then

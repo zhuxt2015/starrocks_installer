@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  # FE2 节点 (Follower)
+  fe2:
+    image: starrocks/fe-ubuntu:3.3.17
+    container_name: starrocks-fe2
+    hostname: fe2
+    network_mode: host
+    environment:
+      - HOST_TYPE=IP
+    volumes:
+      - ../shared-config/fe/fe.conf:/opt/starrocks/fe/conf/fe.conf
+      - ./data/fe2:/opt/starrocks/fe/meta
+      - ./logs/fe2:/opt/starrocks/fe/log
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 8G
+
+  # CN2 节点
+  cn2:
+    image: starrocks/cn-ubuntu:3.3.17
+    container_name: starrocks-cn2
+    hostname: cn2
+    network_mode: host
+    environment:
+      - HOST_TYPE=IP
+    volumes:
+      - ../shared-config/cn/cn.conf:/opt/starrocks/cn/conf/cn.conf
+      - ./data/cn2:/opt/starrocks/cn/storage
+      - ./logs/cn2:/opt/starrocks/cn/log
+    depends_on:
+      - fe2
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 24G
+        reservations:
+          memory: 16G

@@ -71,6 +71,12 @@ main() {
         log_info "Modifying fe root account password"
         mysql --connect_timeout=5 -h "$leader" -uroot -P9030 -Ne "alter user root identified by '$fe_root_password'"
     fi
+
+    # 安装AuditLoader审计日志插件
+    if [ "${install_auditloader:-true}" = "true" ]; then
+        bash "$SCRIPT_DIR/auditloader_setup.sh"
+    fi
+
     # 打印集群信息
     log_info "StarRocks cluster information:"
     if [ -n "$fe_root_password" ];then
